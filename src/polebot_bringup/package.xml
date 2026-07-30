@@ -16,6 +16,7 @@
   <exec_depend>polebot_control</exec_depend>
   <exec_depend>polebot_teleop</exec_depend>
   <exec_depend>polebot_dashboard</exec_depend>
+  <exec_depend>tongyi_canopen_driver</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

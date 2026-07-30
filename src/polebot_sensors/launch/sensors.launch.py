@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
 POLEBOT Sensors Launch
-Brings up LiDAR, IMU, and Camera drivers
+Brings up LiDAR, IMU, and Camera drivers.
+
+NOTE: Odometry and TF (odom → base_link) are handled by
+      tongyi_canopen_driver — do NOT launch a separate odometry
+      node from this file to avoid conflicts.
 """
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction

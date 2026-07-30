@@ -1,0 +1,63 @@
+tongyi_canopen_node:
+  ros__parameters:
+
+    # ── CAN interface ──────────────────────────────────────────────────────────
+    can_interface: can0
+
+    # ── Velocity unit ──────────────────────────────────────────────────────────
+    # TongYi raw unit = 0.1 rpm  →  raw = rpm × 10
+    velocity_unit_raw_per_rpm: 10.0
+
+    # ── Gearbox ────────────────────────────────────────────────────────────────
+    # POLEBOT measured gear ratio: 31.77
+    # Re-calibrate with a 3m straight run: odom_dist / actual_dist = ratio
+    gear_ratio: 31.77
+
+    # ── Speed limits ───────────────────────────────────────────────────────────
+    # At gear 31.77 → max_wheel ≈ 31.5 rpm ≈ 0.26 m/s
+    max_motor_rpm: 1000.0
+
+    # Safety: zero motors if no cmd_vel received within this window
+    command_timeout_s: 0.5
+
+    # Control loop frequency (Hz)
+    control_hz: 50.0
+
+    # ── Ramp / acceleration ────────────────────────────────────────────────────
+    max_wheel_accel_rpm_per_s: 30.0
+    profile_acceleration_rpm_per_s: 1000.0
+
+    # ── Startup behaviour ──────────────────────────────────────────────────────
+    # Set auto_enable: false for safety — enable manually via service
+    auto_enable: false
+    send_zero_on_start: true
+
+    # ── Motor node IDs (POLEBOT hardware) ─────────────────────────────────────
+    # Left wheel:  CANopen node ID 11
+    # Right wheel: CANopen node ID 10
+    # command_sign / feedback_sign: adjust if odom integrates backwards
+    left:
+      node_id: 11
+      command_sign: 1
+      feedback_sign: -1
+
+    right:
+      node_id: 10
+      command_sign: -1
+      feedback_sign: 1
+
+    # ── POLEBOT Differential Drive Geometry ───────────────────────────────────
+    # wheel_radius: measured tyre rolling radius (metres) — from polebot URDF
+    # wheel_base:   lateral distance between contact patches (metres)
+    # NOTE: Update these after physical calibration on the actual robot!
+    wheel_radius: 0.065    # URDF value — recalibrate with ruler test
+    wheel_base: 0.35       # URDF value — recalibrate with rotation test
+
+    # ── Odometry frames ────────────────────────────────────────────────────────
+    odom_frame_id: odom
+    base_frame_id: base_link
+    publish_tf: true
+
+    # ── TPDO3 periodic feedback ────────────────────────────────────────────────
+    # 20 ms → 50 Hz feedback, matching control_hz
+    feedback_event_timer_ms: 20
