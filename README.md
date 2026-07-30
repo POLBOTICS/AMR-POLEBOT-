@@ -135,5 +135,5 @@ This project is licensed under the Apache License 2.0 — see [LICENSE](LICENSE)
 
 <div align="center">
   <strong>Politeknik Manufaktur Bandung</strong><br>
-  AMR-POLEBOT Project 🤖
+  AMR-POLEBOT Project
 </div>
