@@ -1,0 +1,11 @@
+# Get map info service
+# Request
+string map_name
+---
+# Response
+bool success
+string map_path
+float32 resolution
+int32 width
+int32 height
+geometry_msgs/Point origin

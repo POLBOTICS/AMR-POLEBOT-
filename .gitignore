@@ -1,0 +1,67 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# ROS 2 build artifacts
+build/
+install/
+log/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# colcon
+.colcon_workspace
+
+# Map files generated
+*.pgm
+*.yaml
+!src/**/config/*.yaml
+!src/**/params/*.yaml
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+*.env
+
+# Python
+*.egg-info/
+dist/
+.eggs/
+
+# Logs
+*.log
+ros2_*.log
+
+# Bags
+*.db3
+*.mcap
+*.bag
+
+# Compiled
+*.o
+*.a
+*.so
+*.dll
+
+# Gazebo
+.gazebo/
+
+# Temporary
+tmp/
+temp/

@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>polebot_simulation</name>
+  <version>0.1.0</version>
+  <description>Gazebo simulation worlds and launch files for AMR-POLEBOT</description>
+  <maintainer email="polman@polman-bandung.ac.id">MiraeNK</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>gazebo_ros_pkgs</exec_depend>
+  <exec_depend>polebot_description</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>
