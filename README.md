@@ -1,4 +1,4 @@
-# 🤖 AMR-POLEBOT-WS
+# AMR-POLEBOT-WS
 
 > **Official development workspace for the AMR-POLEBOT project**  
 > Politeknik Manufaktur Bandung (POLMAN)
