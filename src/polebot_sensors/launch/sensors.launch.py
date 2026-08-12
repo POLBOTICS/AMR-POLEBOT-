@@ -8,7 +8,8 @@ NOTE: Odometry and TF (odom → base_link) are handled by
       node from this file to avoid conflicts.
 """
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
@@ -16,26 +17,25 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
+    lidar_ip     = LaunchConfiguration('lidar_ip')
 
     # =================== LiDAR ===========================
-    # Default: RPLIDAR — swap with your LiDAR driver if different
-    lidar_node = Node(
-        package='rplidar_ros',
-        executable='rplidar_composition',
-        name='rplidar',
-        output='screen',
-        parameters=[{
-            'serial_port': '/dev/ttyUSB0',
-            'serial_baudrate': 115200,
-            'frame_id': 'lidar_link',
-            'inverted': False,
-            'angle_compensate': True,
-            'scan_mode': 'Standard',
-        }],
+    # Autonics LSC Series — Ethernet (192.168.0.1:8000)
+    lidar_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            PathJoinSubstitution([
+                FindPackageShare('polebot_sensors'),
+                'launch',
+                'lidar.launch.py',
+            ])
+        ]),
+        launch_arguments={
+            'lidar_ip':  lidar_ip,
+            'frame_id':  'laser',
+        }.items(),
     )
 
     # =================== IMU =============================
-    # Default: MPU6050 / BNO055 via I2C
     imu_node = Node(
         package='imu_tools',
         executable='imu_filter_madgwick_node',
@@ -57,7 +57,6 @@ def generate_launch_description():
     )
 
     # =================== Camera ==========================
-    # Default: USB Camera via v4l2
     camera_node = Node(
         package='v4l2_camera',
         executable='v4l2_camera_node',
@@ -77,7 +76,9 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='false'),
-        lidar_node,
+        DeclareLaunchArgument('lidar_ip',    default_value='192.168.0.1',
+                              description='Autonics LSC IP address'),
+        lidar_launch,
         imu_node,
         camera_node,
     ])

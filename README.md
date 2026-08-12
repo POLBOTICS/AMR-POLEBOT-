@@ -112,18 +112,18 @@ ros2 launch polebot_navigation navigation.launch.py
 
 ## 🔗 Related Repositories
 
-- **Motor Driver**: [tongyi_canopen_driver](https://github.com/MiraeNK/tongyi_canopen_driver) — ROS 2 Jazzy SocketCAN driver for TongYi IxLII CANopen servo drives *(included as git submodule)*
+- **Motor Driver**: [AMR-POLEBOT Motor Driver](https://github.com/MiraeNK) — Hardware interface for motor controllers
 - **Workspace**: [AMR-POLEBOT-WS](https://github.com/MiraeNK/AMR-POLEBOT-WS)
 
 ---
 
 ## 👥 Contributors
 
-| Name | Role | Area |
-|------|------|------|
-| MiraeNK | Lead Developer | Interfacing & Mission Control |
-| Iridnes | Developer | Motor Control & Limb Control |
-| RkZx | Developer | SLAM Mapping & Navigation |
+| Name    | Role           | Area                                        | 
+|---------|----------------|---------------------------------------------|
+| MiraeNK | Lead Developer | Interfacing, Mission Control, & Navigation  |
+| Iridnes | Developer      | Motor Control & Diff Drive                  |
+| RkZx    | Developer      | SLAM Mapping & Navigation                   | 
 
 ---
 
@@ -135,5 +135,5 @@ This project is licensed under the Apache License 2.0 — see [LICENSE](LICENSE)
 
 <div align="center">
   <strong>Politeknik Manufaktur Bandung</strong><br>
-  AMR-POLEBOT Project 🤖
+  AMR-POLEBOT Project 
 </div>
