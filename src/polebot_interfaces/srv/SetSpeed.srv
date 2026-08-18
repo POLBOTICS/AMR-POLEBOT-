@@ -1,8 +1,0 @@
-# Set wheel speed service
-# Request
-float64 left_speed_rpm
-float64 right_speed_rpm
----
-# Response
-bool success
-string message

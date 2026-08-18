@@ -28,11 +28,8 @@ AMR-POLEBOT-WS/
 │   ├── polebot_navigation/     # Nav2 navigation stack config
 │   ├── polebot_slam/           # SLAM Toolbox mapping config
 │   ├── polebot_sensors/        # LiDAR, IMU, Camera drivers/config
-│   ├── polebot_teleop/         # Keyboard & joystick teleoperation
-│   ├── polebot_control/        # Custom control logic (C++)
+│   ├── polebot_web_teleop/     # 100% Offline Mobile Web Joystick UI
 │   ├── polebot_simulation/     # Gazebo simulation worlds
-│   ├── polebot_dashboard/      # Web-based monitoring dashboard
-│   └── polebot_interfaces/     # Custom ROS 2 msg/srv/action types
 ├── docker/                     # Dockerfiles for deployment
 ├── docs/                       # Documentation & diagrams
 ├── scripts/                    # Utility & setup scripts
@@ -63,7 +60,7 @@ sudo apt install ros-jazzy-ros2-control ros-jazzy-ros2-controllers
 
 ```bash
 # Clone the workspace
-git clone https://github.com/MiraeNK/AMR-POLEBOT-WS.git
+git clone https://github.com/POLBOTICS/AMR-POLEBOT-.git
 cd AMR-POLEBOT-WS
 
 # Install dependencies
@@ -113,7 +110,7 @@ ros2 launch polebot_navigation navigation.launch.py
 ## 🔗 Related Repositories
 
 - **Motor Driver**: [AMR-POLEBOT Motor Driver](https://github.com/MiraeNK) — Hardware interface for motor controllers
-- **Workspace**: [AMR-POLEBOT-WS](https://github.com/MiraeNK/AMR-POLEBOT-WS)
+- **Workspace**: [AMR-POLEBOT-WS](https://github.com/POLBOTICS/AMR-POLEBOT-.git)
 
 ---
 

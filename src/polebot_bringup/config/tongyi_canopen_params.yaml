@@ -1,4 +1,4 @@
-tongyi_canopen_node:
+/polebot/tongyi_canopen_node:
   ros__parameters:
 
     # ── CAN interface ──────────────────────────────────────────────────────────
@@ -14,8 +14,8 @@ tongyi_canopen_node:
     gear_ratio: 31.77
 
     # ── Speed limits ───────────────────────────────────────────────────────────
-    # At gear 31.77 → max_wheel ≈ 31.5 rpm ≈ 0.26 m/s
-    max_motor_rpm: 1000.0
+    # At gear 31.77 → max_wheel ≈ 251 rpm ≈ 1.7 m/s
+    max_motor_rpm: 8000.0
 
     # Safety: zero motors if no cmd_vel received within this window
     command_timeout_s: 0.5
@@ -24,7 +24,7 @@ tongyi_canopen_node:
     control_hz: 50.0
 
     # ── Ramp / acceleration ────────────────────────────────────────────────────
-    max_wheel_accel_rpm_per_s: 30.0
+    max_wheel_accel_rpm_per_s: 300.0
     profile_acceleration_rpm_per_s: 1000.0
 
     # ── Startup behaviour ──────────────────────────────────────────────────────
