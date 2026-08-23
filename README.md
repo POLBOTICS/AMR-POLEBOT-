@@ -137,3 +137,61 @@ This project is licensed under the Apache License 2.0 — see [LICENSE](LICENSE)
   <strong>Politeknik Manufaktur Bandung</strong><br>
   AMR-POLEBOT Project
 </div>
+
+
+23 Agustus 2026, Push terkait nambah urdf robot ma troley, slam (lidar only)
+
+-TERMINAL 1 — Nyalakan CAN0 + Tongyi--
+cd ~/polebot_ws
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+bash install/tongyi_canopen_driver/lib/tongyi_canopen_driver/setup_can0_500k.sh
+
+
+--TERMINAL 2 — Jalankan Tongyi Bringup--
+cd ~/polebot_ws
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch tongyi_canopen_driver tongyi_bringup.launch.py teleop:=true
+
+
+--TERMINAL 3 — Enable Motor--
+cd ~/polebot_ws
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 service call /tongyi_canopen_node/enable std_srvs/srv/Trigger {}
+
+
+--TERMINAL 4 — Jalankan LiDAR--
+Pastikan LiDAR fisik sudah menyala.
+cd ~/polebot_ws
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch polebot_amr_bringup sens_lidar_lsc.launch.py
+atau:
+ros2 launch polebot_amr_bringup tongyi_lidar_slam.launch.py
+(Jangan tutup terminal ini)
+
+--ENABLE FIXED FRAME MAP--
+# Cek status
+ros2 lifecycle get /slam_toolbox
+
+# Jika: unconfigured [1]
+ros2 lifecycle set /slam_toolbox configure
+
+# Cek
+ros2 lifecycle get /slam_toolbox
+
+# Jika: inactive [2]
+ros2 lifecycle set /slam_toolbox activate
+nanti opsi fixed frame=map muncul, langsung slam
+
+--TERMINAL 6 — JALANKAN SLAM TOOLBOX--
+cd ~/polebot_ws
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 run slam_toolbox sync_slam_toolbox_node \
+  --ros-args \
+  --params-file src/polebot_amr_bringup/config/polebot_amr_mapper_params.yaml
+
+  
