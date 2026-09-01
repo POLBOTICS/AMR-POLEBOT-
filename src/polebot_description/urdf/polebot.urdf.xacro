@@ -197,7 +197,7 @@
   <joint name="lidar_joint" type="fixed">
     <parent link="base_link"/>
     <child  link="lidar_link"/>
-    <origin xyz="${lidar_xoff} 0 ${lidar_zoff}" rpy="0 0 0"/>
+    <origin xyz="${lidar_xoff} 0 ${lidar_zoff}" rpy="0 0 -${pi/2}"/>
   </joint>
 
   <!-- IMU frame -->
