@@ -38,9 +38,9 @@ class CmdVelToTongyiRpmNode(Node):
         self.declare_parameter("right_target_rpm_topic", "/tongyi_canopen_node/right/target_rpm")
 
         self.declare_parameter("wheel_radius_m", 0.079)
-        self.declare_parameter("wheel_separation_m", 0.590)
-        self.declare_parameter("gear_ratio_left", 32.0)
-        self.declare_parameter("gear_ratio_right", 32.0)
+        self.declare_parameter("wheel_separation_m", 0.600)
+        self.declare_parameter("gear_ratio_left", 31.77)
+        self.declare_parameter("gear_ratio_right", 31.77)
 
         self.declare_parameter("left_command_sign", -1.0)
         self.declare_parameter("right_command_sign", -1.0)

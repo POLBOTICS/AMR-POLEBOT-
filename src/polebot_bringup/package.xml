@@ -2,16 +2,21 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>polebot_bringup</name>
-  <version>0.0.1</version>
-  <description>Launch entry point utama untuk menyalakan seluruh subsistem Polebot AMR</description>
-  <maintainer email="you@example.com">Nabeel</maintainer>
+  <version>0.1.0</version>
+  <description>Bringup launch files for AMR-POLEBOT complete system</description>
+  <maintainer email="polman@polman-bandung.ac.id">MiraeNK</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <exec_depend>tongyi_canopen_driver</exec_depend>
   <exec_depend>polebot_description</exec_depend>
   <exec_depend>polebot_sensors</exec_depend>
+  <exec_depend>polebot_navigation</exec_depend>
+  <exec_depend>polebot_slam</exec_depend>
+  <exec_depend>polebot_control</exec_depend>
+  <exec_depend>polebot_teleop</exec_depend>
+  <exec_depend>polebot_dashboard</exec_depend>
+  <exec_depend>tongyi_canopen_driver</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
