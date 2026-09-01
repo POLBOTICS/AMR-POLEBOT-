@@ -1,0 +1,42 @@
+slam_toolbox:
+  ros__parameters:
+    # Frame
+    odom_frame: "odom"
+    map_frame: "map"
+    base_frame: "base_link"
+    scan_topic: "/scan"
+
+    # Mode: async (cocok untuk robot dengan odometry)
+    mode: mapping
+
+    # Publish TF
+    publish_tf: true
+    transform_publish_period: 0.05   # 20 Hz
+
+    # Map update
+    map_update_interval: 1.0
+    resolution: 0.05
+
+    # Laser params (LiDAR 2D)
+    max_laser_range: 25.0
+    minimum_time_interval: 0.1
+    transform_timeout: 0.5
+    tf_buffer_duration: 30.0
+    stack_size_to_use: 40000000
+
+    # Scan matching
+    use_scan_matching: true
+    use_scan_barycenter: true
+    minimum_travel_distance: 0.1
+    minimum_travel_heading: 0.15
+
+    # Buffer
+    scan_buffer_size: 40
+    max_scan_buffer_size: 40
+
+    # Odom trust (aktifkan karena robot AMR punya odometry bagus)
+    trust_odom_with_scan_matching: true
+
+    # Debug
+    debug_logging: false
+    throttle_scans: 1
