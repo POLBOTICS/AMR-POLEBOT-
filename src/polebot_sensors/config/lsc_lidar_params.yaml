@@ -1,0 +1,22 @@
+lsc_node:
+  ros__parameters:
+
+    # ── Network ───────────────────────────────────────────────────────────────
+    # Default Autonics LSC IP: 192.168.0.1
+    # Connect PC ethernet (enp3s0) to same subnet: 192.168.0.100/24
+    addr: "192.168.0.1"
+    port: "8000"
+
+    # ── Scan frame ────────────────────────────────────────────────────────────
+    # Must match the frame_id in polebot URDF: "laser"
+    frame_id: "laser"
+
+    # ── Range filter ──────────────────────────────────────────────────────────
+    range_min: 0.05    # [m] minimum valid range
+    range_max: 25.0    # [m] maximum valid range (LSC series max)
+
+    # ── Topic ─────────────────────────────────────────────────────────────────
+    pub_topic: "scan"
+
+    # ── Intensities ───────────────────────────────────────────────────────────
+    intensities: true

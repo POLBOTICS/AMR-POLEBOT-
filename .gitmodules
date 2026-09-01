@@ -1,0 +1,6 @@
+[submodule "src/tongyi_canopen_driver"]
+	path = src/tongyi_canopen_driver
+	url = https://github.com/MiraeNK/tongyi_canopen_driver.git
+[submodule "src/lsc_ros2_driver"]
+	path = src/lsc_ros2_driver
+	url = https://github.com/AutonicsLiDAR/lsc_ros2_driver.git

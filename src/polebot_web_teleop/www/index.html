@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>POLEBOT Teleop</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+            touch-action: none; /* Prevent scrolling */
+        }
+        
+        #header {
+            position: absolute;
+            top: 20px;
+            text-align: center;
+        }
+
+        h1 { margin: 0; font-size: 24px; color: #4CAF50; }
+        #status { font-size: 14px; color: #ff5252; margin-top: 5px; }
+        
+        /* Joystick styling */
+        #joystick-zone {
+            width: 300px;
+            height: 300px;
+            background-color: rgba(255, 255, 255, 0.05);
+            border: 2px solid #333;
+            border-radius: 50%;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        #stick {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #4CAF50, #2E7D32);
+            border-radius: 50%;
+            position: absolute;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            transition: all 0.05s ease;
+        }
+
+        #data {
+            position: absolute;
+            bottom: 30px;
+            font-family: monospace;
+            background: #000;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        /* Speed Controls */
+        #speed-controls {
+            position: absolute;
+            bottom: 40px;
+            display: flex;
+            gap: 15px;
+            background: rgba(0,0,0,0.5);
+            padding: 10px 20px;
+            border-radius: 30px;
+            border: 1px solid #333;
+        }
+
+        .speed-btn {
+            background: #333;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .speed-btn.active {
+            background: #4CAF50;
+            box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+        }
+        .action-btn {
+            background: #2196F3;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .btn-stop {
+            background: #f44336;
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            font-size: 20px;
+            margin-bottom: 20px;
+            border: 4px solid #fff;
+        }
+
+        .btn-motor-on { background: #4CAF50; }
+        .btn-motor-off { background: #ff9800; }
+
+        #motor-controls {
+            position: absolute;
+            top: 70px;
+            display: flex;
+            gap: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="header">
+        <h1>POLEBOT Teleop</h1>
+        <div id="status">🔴 Disconnected</div>
+    </div>
+
+    <div id="motor-controls">
+        <button class="action-btn btn-motor-on" onclick="callService('/polebot/tongyi_canopen_node/enable')">🔋 Motor ON</button>
+        <button class="action-btn btn-motor-off" onclick="callService('/polebot/tongyi_canopen_node/disable')">📴 Motor OFF</button>
+    </div>
+
+    <button class="action-btn btn-stop" onclick="resetStick()">🛑<br>STOP</button>
+
+    <div id="joystick-zone">
+        <div id="stick"></div>
+    </div>
+
+    <div id="speed-controls">
+        <button class="speed-btn active" id="btn-slow" onclick="setSpeed(0.5, 1.0, 'btn-slow')">🐢 Slow</button>
+        <button class="speed-btn" id="btn-norm" onclick="setSpeed(1.0, 2.0, 'btn-norm')">🚶 Normal</button>
+        <button class="speed-btn" id="btn-fast" onclick="setSpeed(1.5, 3.0, 'btn-fast')">🐇 Fast</button>
+    </div>
+
+    <div id="data">v: 0.00 | w: 0.00</div>
+
+    <script>
+        // --- 1. WebSocket ROSBridge Setup ---
+        // Automatically connect to the IP that is hosting this page
+        const ws = new WebSocket(`ws://${window.location.hostname}:9090`);
+        const statusEl = document.getElementById('status');
+        
+        ws.onopen = () => {
+            statusEl.textContent = "🟢 Connected to ROS 2";
+            statusEl.style.color = "#4CAF50";
+            
+            // Advertise the topic
+            ws.send(JSON.stringify({
+                op: "advertise",
+                topic: "/cmd_vel",
+                type: "geometry_msgs/msg/Twist"
+            }));
+        };
+
+        ws.onclose = () => {
+            statusEl.textContent = "🔴 Disconnected (Refresh to retry)";
+            statusEl.style.color = "#ff5252";
+        };
+
+        ws.onerror = (error) => {
+            console.error("WebSocket Error:", error);
+        };
+
+        // --- 1b. Call Service ---
+        function callService(serviceName) {
+            if (ws.readyState !== WebSocket.OPEN) return;
+            ws.send(JSON.stringify({
+                op: "call_service",
+                service: serviceName,
+                args: {}
+            }));
+            
+            // Provide visual feedback
+            const origColor = statusEl.style.color;
+            statusEl.textContent = `⏳ Calling ${serviceName.split('/').pop()}...`;
+            statusEl.style.color = "#ffeb3b";
+            setTimeout(() => {
+                statusEl.textContent = "🟢 Connected to ROS 2";
+                statusEl.style.color = "#4CAF50";
+            }, 1000);
+        }
+
+        // --- 2. Publish Twist Message ---
+        let lastV = 0;
+        let lastW = 0;
+        let pubInterval = null;
+
+        function publishCmdVel(v, w) {
+            if (ws.readyState !== WebSocket.OPEN) return;
+            
+            const msg = {
+                op: "publish",
+                topic: "/cmd_vel",
+                msg: {
+                    linear: { x: v, y: 0.0, z: 0.0 },
+                    angular: { x: 0.0, y: 0.0, z: w }
+                }
+            };
+            ws.send(JSON.stringify(msg));
+            document.getElementById('data').textContent = `v: ${v.toFixed(2)} | w: ${w.toFixed(2)}`;
+        }
+
+        // --- 3. Vanilla JS Joystick Implementation ---
+        const zone = document.getElementById('joystick-zone');
+        const stick = document.getElementById('stick');
+        
+        // Speed settings (Default to Slow)
+        let maxV = 0.5; // Linear cap (m/s)
+        let maxW = 1.0; // Angular cap (rad/s)
+        
+        function setSpeed(v, w, btnId) {
+            maxV = v;
+            maxW = w;
+            
+            // Update UI buttons
+            document.querySelectorAll('.speed-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(btnId).classList.add('active');
+        }
+
+        let active = false;
+        let maxRadius = zone.offsetWidth / 2 - stick.offsetWidth / 2;
+        let centerX, centerY;
+
+        function resetStick() {
+            active = false;
+            stick.style.transform = `translate(0px, 0px)`;
+            lastV = 0;
+            lastW = 0;
+            publishCmdVel(0, 0); // Stop robot immediately
+            if(pubInterval) clearInterval(pubInterval);
+        }
+
+        function handleStart(e) {
+            e.preventDefault();
+            active = true;
+            const rect = zone.getBoundingClientRect();
+            centerX = rect.left + rect.width / 2;
+            centerY = rect.top + rect.height / 2;
+            
+            // Start continuous publishing at 10Hz while joystick is held
+            pubInterval = setInterval(() => publishCmdVel(lastV, lastW), 100);
+            handleMove(e);
+        }
+
+        function handleMove(e) {
+            if (!active) return;
+            e.preventDefault();
+            
+            let clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+            let clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+
+            let dx = clientX - centerX;
+            let dy = clientY - centerY;
+            let distance = Math.sqrt(dx * dx + dy * dy);
+
+            // Cap the stick inside the circle
+            if (distance > maxRadius) {
+                dx = (dx / distance) * maxRadius;
+                dy = (dy / distance) * maxRadius;
+                distance = maxRadius;
+            }
+
+            stick.style.transform = `translate(${dx}px, ${dy}px)`;
+
+            // Forward/Back
+            let normalizedY = -dy / maxRadius; 
+            // Left/Right
+            let normalizedX = -dx / maxRadius;
+
+            lastV = normalizedY * maxV;
+            lastW = normalizedX * maxW;
+        }
+
+        // Event Listeners (Touch & Mouse)
+        stick.addEventListener('touchstart', handleStart, {passive: false});
+        document.addEventListener('touchmove', handleMove, {passive: false});
+        document.addEventListener('touchend', resetStick);
+
+        stick.addEventListener('mousedown', handleStart);
+        document.addEventListener('mousemove', handleMove);
+        document.addEventListener('mouseup', resetStick);
+
+        // Recalculate radius on resize
+        window.addEventListener('resize', () => {
+            maxRadius = zone.offsetWidth / 2 - stick.offsetWidth / 2;
+        });
+    </script>
+</body>
+</html>
