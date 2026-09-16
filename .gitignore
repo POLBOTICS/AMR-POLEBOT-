@@ -25,6 +25,8 @@ Makefile
 *.yaml
 !src/**/config/*.yaml
 !src/**/params/*.yaml
+!src/**/config/*.pgm
+!src/**/params/*.pgm
 
 # Editor/IDE
 .vscode/

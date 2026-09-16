@@ -62,7 +62,7 @@ I_EFF = _I_Z   + 2.0 * _I_WHEEL * (_d / WHEEL_RADIUS) ** 2  # ≈ 15.73 kg·m²
 
 # Effective rotational inertia accounting for trailer mass & moment arm per mode
 I_EFF_MAP = {
-    0: I_EFF,    # Solo: ~15.73 kg·m²
+    0: 28.0,     # Solo: diadaptasi dari Trolley Pivot (28.0) agar torsi rotasi (yaw authority) kuat membelokkan robot
     1: 30.0,     # Fixed tow: robot + rigid trailer inertia
     2: 28.0,     # Pivot tow: robot + articulated trailer hitch yaw resistance
 }
@@ -75,11 +75,11 @@ TAU_MAX = 40.0    # N·m per wheel — safe within actuator limit (50.0 N·m in 
 #         phi1 [m/s], phi2 [rad/s] (boundary-layer width, same units as S1/S2)
 #         v_max [m/s], omega_max [rad/s]
 SMC_PARAMS = {
-    0: {  # Solo — no trolley
-        'lambda1': 0.5, 'lambda2': 1.2,
-        'K1': 1.0,  'K2': 8.0,
-        'phi1': 0.3, 'phi2': 0.2,
-        'v_max': 0.50, 'omega_max': 1.50,
+    0: {  # Solo — diadaptasi penuh dari konfigurasi Trolley Pivot yang sukses belok
+        'lambda1': 0.5, 'lambda2': 1.5,
+        'K1': 2.0,  'K2': 10.0,
+        'phi1': 0.35, 'phi2': 0.25,
+        'v_max': 0.30, 'omega_max': 0.60,
     },
     1: {  # Fixed tow — rigid hitch
         'lambda1': 0.5, 'lambda2': 1.0,
@@ -374,9 +374,9 @@ class SlidingModeControllerNode(Node):
             # Focus on aligning heading before driving forward
             v_dot_d     = -v / (0.2 + self._dt)   # decelerate to stop
             omega_dot_d = p['K2'] * sat_S2 + p['lambda2'] * phi_dot
-            # Pivot mode: maintain minimum forward creep during large turns
-            # only when far from goal, so trailer follows a curve
-            if self._mode == 2 and dist_goal > LOOKAHEAD_DIST:
+            # Diadaptasi dari Trolley Pivot: pertahankan minimum forward creep saat belokan tajam
+            # agar robot bergerak membentuk kurva dan tidak macet berputar di tempat
+            if dist_goal > LOOKAHEAD_DIST:
                 V_CREEP = 0.08   # m/s — minimum forward speed during alignment
                 if v < V_CREEP:
                     v_dot_d = max(v_dot_d, (V_CREEP - v) / (0.3 + self._dt))
