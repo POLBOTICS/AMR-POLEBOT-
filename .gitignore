@@ -65,3 +65,15 @@ ros2_*.log
 # Temporary
 tmp/
 temp/
+
+# Archives & Backups
+*.zip
+*.tar.gz
+*.tgz
+*.rar
+
+# 3D & CAD Backup files
+*.FCBak
+*.sdf.bak
+backup/
+

@@ -30,7 +30,7 @@
     <xacro:property name="wheel_radius" value="0.079"/>
     <xacro:property name="wheel_width" value="0.055"/>
     <xacro:property name="wheel_xoff" value="0.000"/>
-    <xacro:property name="wheel_yoff" value="-0.300"/>
+    <xacro:property name="wheel_yoff" value="0.300"/>
     <xacro:property name="wheel_separation" value="0.600"/> <!-- 2 * abs(wheel_yoff) -->
     <xacro:property name="wheel_zoff" value="0.231"/>
 
@@ -179,7 +179,7 @@
             <upper>inf</upper>
           </limit>
           <dynamics>
-            <damping>0.5</damping>
+            <damping>0.02</damping>
           </dynamics>
         </axis>
       </joint>
@@ -208,6 +208,11 @@
               <length>${wheel_width}</length>
             </cylinder>
           </geometry>
+          <surface><friction><ode>
+            <fdir1>1 0 0</fdir1>
+            <mu>3.0</mu>
+            <mu2>3.0</mu2>
+          </ode></friction></surface>
         </collision>
 
         <xacro:cylinder_inertia m="${wheel_mass}" r="${wheel_radius}" h="${wheel_width}"/>
@@ -263,10 +268,10 @@
       </link>
     </xacro:macro>
 
-    <xacro:caster_wheel prefix="casterwhl_fl" x_reflect="-1" y_reflect="1" />
-    <xacro:caster_wheel prefix="casterwhl_fr" x_reflect="-1" y_reflect="-1" />
-    <xacro:caster_wheel prefix="casterwhl_rl" x_reflect="1" y_reflect="1" />
-    <xacro:caster_wheel prefix="casterwhl_rr" x_reflect="1" y_reflect="-1" />
+    <xacro:caster_wheel prefix="casterwhl_fl" x_reflect="1" y_reflect="1" />
+    <xacro:caster_wheel prefix="casterwhl_fr" x_reflect="1" y_reflect="-1" />
+    <xacro:caster_wheel prefix="casterwhl_rl" x_reflect="-1" y_reflect="1" />
+    <xacro:caster_wheel prefix="casterwhl_rr" x_reflect="-1" y_reflect="-1" />
 
     <joint name='imu_joint' type='fixed'>
       <parent>base_link</parent>
@@ -371,6 +376,8 @@
       <dimensions>3</dimensions>
       <odom_frame>ground_truth_odom</odom_frame>
       <robot_base_frame>base_link</robot_base_frame>
+      <odom_topic>/model/polebot_amr/odometry</odom_topic>
+      <tf_topic>/model/polebot_amr/tf</tf_topic>
       <odom_publish_frequency>50</odom_publish_frequency>
     </plugin>
 
@@ -478,12 +485,18 @@
       </sensor>
     </link>
 
-    <!-- Diff-drive actuation — dikembalikan ke plugin native Gazebo,
-         sesuai versi workspace sebelumnya (polman-mbd-ros2-agus) yang
-         sudah terbukti jalan. Blok ros2_control/gz_ros2_control effort
-         yang lama dihapus karena tidak pernah punya controller_manager
-         + controllers.yaml yang aktif, jadi /cmd_vel tidak pernah
-         benar-benar menggerakkan roda. -->
+    <!-- Mode aktuasi robot — bisa dipilih, TIDAK boleh dua-duanya aktif
+         bersamaan (akan rebutan mengontrol roda yang sama):
+           - "diffdrive"      : plugin native Gazebo, dipakai motion control
+                                 pure-pursuit/PID yang sudah ada (publish /cmd_vel).
+           - "effort_control" : ros2_control + gz_ros2_control, dipakai
+                                 controller SMC/path-planning point-cloud baru
+                                 (publish torsi ke /joint_group_effort_controller/commands).
+         Default tetap "diffdrive" supaya launch file lama tidak berubah sama sekali. -->
+    <xacro:arg name="actuation_mode" default="diffdrive"/>
+    <xacro:property name="actuation_mode_val" value="$(arg actuation_mode)"/>
+
+    <xacro:if value="${actuation_mode_val == 'diffdrive'}">
     <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
       <!-- wheels -->
       <left_joint>drivewhl_l_joint</left_joint>
@@ -494,7 +507,7 @@
       <wheel_radius>${wheel_radius}</wheel_radius>
 
       <!-- limits -->
-      <max_linear_acceleration>0.1</max_linear_acceleration>
+      <max_linear_acceleration>2.0</max_linear_acceleration>
 
       <!-- input -->
       <topic>/cmd_vel</topic>
@@ -506,6 +519,44 @@
       <frame_id>odom</frame_id>
       <child_frame_id>base_link</child_frame_id>
     </plugin>
+    </xacro:if>
+
+    <xacro:if value="${actuation_mode_val == 'effort_control'}">
+    <ros2_control name="polebot_diff_drive" type="system">
+      <hardware>
+        <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+      </hardware>
+      <joint name="drivewhl_l_joint">
+        <command_interface name="effort">
+          <param name="min">-50</param>
+          <param name="max">50</param>
+        </command_interface>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+      </joint>
+      <joint name="drivewhl_r_joint">
+        <command_interface name="effort">
+          <param name="min">-50</param>
+          <param name="max">50</param>
+        </command_interface>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+      </joint>
+    </ros2_control>
+
+    <xacro:arg name="controllers_yaml" default=""/>
+    <xacro:property name="controllers_yaml_val" value="$(arg controllers_yaml)"/>
+    <plugin filename="gz_ros2_control-system"
+            name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>${controllers_yaml_val}</parameters>
+    </plugin>
+    </xacro:if>
+
+    <!-- NOTE controllers_yaml: xacro TIDAK bisa mensubstitusi "$(arg ...)" (itu
+         sintaks launch ROS2). Path controllers.yaml WAJIB dikirim lewat parameter
+         `mappings={'controllers_yaml': <path_absolut>}` saat xacro.process_file()
+         dipanggil dari launch file Python, seperti pada sim_path_planning_smc.launch.py. -->
+
 
     <!-- Hitch point at rear of robot for trolley attachment -->
     <joint name='hitch_joint' type='fixed'>
@@ -515,6 +566,38 @@
     </joint>
     <link name='hitch_link'>
       <pose relative_to="hitch_joint"/>
+      <!-- Tongkat pengait visual HANYA untuk mode pivot (revolute). Mode fixed langsung menempel tanpa tongkat pengait. -->
+      <xacro:if value="${hitch_type_val == 'revolute'}">
+        <!-- Visual tongkat pengait 0.300m (0.050m masuk robot, 0.200m di udara, 0.050m masuk trolley) -->
+        <visual name='tongkat_pengait_visual'>
+          <pose>-0.100 0 -0.05375 0 1.226 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.018</radius>
+              <length>0.319</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.2 0.2 0.2 1.0</ambient>
+            <diffuse>0.3 0.3 0.3 1.0</diffuse>
+            <specular>0.6 0.6 0.6 1.0</specular>
+          </material>
+        </visual>
+        <!-- Pin pengait di depan tengah trolley (x=-0.200 dari hitch_link robot) -->
+        <visual name='tongkat_pin_visual'>
+          <pose>-0.200 0 -0.1075 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.015</radius>
+              <length>0.070</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.8 0.1 0.1 1.0</ambient>
+            <diffuse>0.8 0.1 0.1 1.0</diffuse>
+          </material>
+        </visual>
+      </xacro:if>
       <inertial>
         <mass>0.001</mass>
         <inertia><ixx>0.000001</ixx><iyy>0.000001</iyy><izz>0.000001</izz>
@@ -538,8 +621,8 @@
     <!-- ============================================================
          NESTED TROLLEY MODEL
          Pose in robot frame: hitch_link at x=-0.586 from base_link
-         Trolley front face at x=+0.650 from trolley_base_link
-         So trolley_base_link sits at x = -0.586 - 0.650 = -1.236 from base_link
+         Tongkat pengait: x=-0.200 from hitch_link (0.200m di udara, 0.050m masuk robot, 0.050m masuk trolley)
+         So trolley_base_link sits at x = -0.586 - 0.200 = -0.786 from base_link
          ============================================================ -->
 
     <!-- Trolley properties (prefixed tr_ to avoid conflict with robot macros) -->
@@ -559,14 +642,14 @@
     <xacro:property name="tr_wheel_radius" value="0.0725"/>
     <xacro:property name="tr_wheel_width" value="0.055"/>
     <xacro:property name="tr_wheel_xoff" value="0.495"/>
-    <xacro:property name="tr_wheel_yoff" value="-0.455"/>
+    <xacro:property name="tr_wheel_yoff" value="0.455"/>
     <xacro:property name="tr_wheel_zoff" value="0.130"/>
 
     <xacro:property name="tr_caster_mass" value="0.5"/>
     <xacro:property name="tr_caster_radius" value="0.0675"/>
     <xacro:property name="tr_caster_width" value="0.055"/>
     <xacro:property name="tr_caster_xoff" value="0.555"/>
-    <xacro:property name="tr_caster_yoff" value="-0.400"/>
+    <xacro:property name="tr_caster_yoff" value="0.400"/>
     <xacro:property name="tr_caster_zoff" value="0.135"/>
 
 
@@ -601,181 +684,411 @@
       </inertial>
     </xacro:macro>
 
-    <!-- Trolley wheel macro -->
-    <xacro:macro name="tr_wheel" params="prefix x_reflect y_reflect">
-      <link name="${prefix}_link">
-        <pose relative_to="${prefix}_joint"/>
-        <visual name="${prefix}_link_visual">
-          <pose relative_to="${prefix}_link">0 0 0 0 0 ${(y_reflect-1)*pi/2}</pose>
-          <geometry>
-            <mesh>
-              <uri>file://${tr_XACRO_DIR}/meshes/trolley_wheel.stl</uri>
-              <scale>0.001 0.001 0.001</scale>
-            </mesh>
-          </geometry>
-          <material>
-            <ambient>0.3 0.3 0.3 1.0</ambient>
-            <diffuse>0.7 0.7 0.7 1.0</diffuse>
-          </material>
-        </visual>
-        <collision name="${prefix}_link_collision">
-          <pose relative_to="${prefix}_link">0 0 0 ${pi/2} 0 0</pose>
-          <geometry>
-            <cylinder>
-              <radius>${tr_wheel_radius}</radius>
-              <length>${tr_wheel_width}</length>
-            </cylinder>
-          </geometry>
-          <surface><friction><ode>
-            <fdir1>1 0 0</fdir1>
-            <mu>0.01</mu>
-            <mu2>3.5</mu2>   <!-- grip lateral dinaikkan: trailer meluruskan diri (anti over-bend) -->
-          </ode></friction></surface>
-        </collision>
-        <xacro:tr_cylinder_inertia m="${tr_wheel_mass}" r="${tr_wheel_radius}" h="${tr_wheel_width}"/>
-      </link>
-      <joint name="${prefix}_joint" type="fixed">
-        <parent>trolley_base_link</parent>
-        <child>${prefix}_link</child>
-        <pose relative_to="trolley_base_link">${x_reflect*tr_wheel_xoff} ${y_reflect*tr_wheel_yoff} ${-tr_wheel_zoff} 0 0 0</pose>
-      </joint>
-    </xacro:macro>
+    <xacro:if value="$(arg include_trolley)">
 
-    <!-- Trolley caster wheel macro -->
-    <xacro:macro name="tr_caster_wheel" params="prefix x_reflect y_reflect">
-      <link name="${prefix}_link">
-        <pose relative_to="${prefix}_joint"/>
-        <visual name="${prefix}_link_visual">
+    <!-- ============================================================
+         A. MODEL TROLLEY PIVOT JOINT (hitch_type == 'revolute')
+         - Tongkat pengait 0.300m (0.200m di udara, 0.050m masuk robot, 0.050m masuk trolley)
+         - Titik pivot tunggal di lubang depan tengah trolley (x = -0.200 dari hitch_link)
+         - trolley_base_link berpusat di lubang pivot depan tengah
+         - Roda belakang pasif berputar (revolute, anti-skid mu2=20.0)
+         - Caster depan berbentuk bola licin (sphere, mu=0.01)
+         ============================================================ -->
+    <xacro:if value="${hitch_type_val == 'revolute'}">
+
+      <!-- Trolley wheel macro (passive revolute wheel, spins when trailer rolls) -->
+      <xacro:macro name="tr_wheel_pivot" params="prefix x_reflect y_reflect">
+        <joint name="${prefix}_joint" type="revolute">
+          <parent>trolley_base_link</parent>
+          <child>${prefix}_link</child>
+          <pose relative_to="trolley_base_link">${-(tr_base_length/2) + x_reflect*tr_wheel_xoff} ${y_reflect*tr_wheel_yoff} ${-tr_wheel_zoff} 0 0 0</pose>
+          <axis>
+            <xyz>0 1 0</xyz>
+            <limit>
+              <lower>-inf</lower>
+              <upper>inf</upper>
+            </limit>
+            <dynamics>
+              <damping>0.005</damping>
+              <friction>0.001</friction>
+            </dynamics>
+          </axis>
+        </joint>
+        <link name="${prefix}_link">
+          <pose relative_to="${prefix}_joint"/>
+          <visual name="${prefix}_link_visual">
+            <pose relative_to="${prefix}_link">0 0 0 0 0 ${(y_reflect-1)*pi/2}</pose>
+            <geometry>
+              <mesh>
+                <uri>file://${tr_XACRO_DIR}/meshes/trolley_wheel.stl</uri>
+                <scale>0.001 0.001 0.001</scale>
+              </mesh>
+            </geometry>
+            <material>
+              <ambient>0.3 0.3 0.3 1.0</ambient>
+              <diffuse>0.7 0.7 0.7 1.0</diffuse>
+            </material>
+          </visual>
+          <collision name="${prefix}_link_collision">
+            <pose relative_to="${prefix}_link">0 0 0 ${pi/2} 0 0</pose>
+            <geometry>
+              <cylinder>
+                <radius>${tr_wheel_radius}</radius>
+                <length>${tr_wheel_width}</length>
+              </cylinder>
+            </geometry>
+            <surface><friction><ode>
+              <fdir1>1 0 0</fdir1>
+              <mu>1.0</mu>
+              <mu2>2.5</mu2>   <!-- Grip lateral terkalibrasi: stabil saat lurus, menyapu alami saat berbelok tanpa menahan kemudi robot -->
+            </ode></friction></surface>
+          </collision>
+          <xacro:tr_cylinder_inertia m="${tr_wheel_mass}" r="${tr_wheel_radius}" h="${tr_wheel_width}"/>
+        </link>
+      </xacro:macro>
+
+      <!-- Trolley caster wheel macro -->
+      <xacro:macro name="tr_caster_wheel_pivot" params="prefix x_reflect y_reflect">
+        <link name="${prefix}_link">
+          <pose relative_to="${prefix}_joint"/>
+          <visual name="${prefix}_link_visual">
+            <geometry>
+              <mesh>
+                <uri>file://${tr_XACRO_DIR}/meshes/trolley_caster.stl</uri>
+                <scale>0.001 0.001 0.001</scale>
+              </mesh>
+            </geometry>
+            <material>
+              <ambient>0.3 0.3 0.3 1.0</ambient>
+              <diffuse>0.7 0.7 0.7 1.0</diffuse>
+            </material>
+          </visual>
+          <collision name="${prefix}_link_collision">
+            <pose relative_to="${prefix}_link">0 0 0 ${pi/2} 0 0</pose>
+            <geometry>
+              <sphere>
+                <radius>${tr_caster_radius}</radius>
+              </sphere>
+            </geometry>
+            <surface><friction><ode>
+              <mu>0.01</mu>
+              <mu2>0.01</mu2>
+            </ode></friction></surface>
+          </collision>
+          <xacro:tr_cylinder_inertia m="${tr_caster_mass}" r="${tr_caster_radius}" h="${tr_caster_width}"/>
+        </link>
+        <joint name="${prefix}_joint" type="fixed">
+          <parent>trolley_base_link</parent>
+          <child>${prefix}_link</child>
+          <pose relative_to="trolley_base_link">${-(tr_base_length/2) + x_reflect*tr_caster_xoff} ${y_reflect*tr_caster_yoff} ${-tr_caster_zoff} 0 0 0</pose>
+        </joint>
+      </xacro:macro>
+
+      <!-- Hitch joint: revolute (Pivot tunggal di satu titik lubang tengah, trailer steers passively) -->
+      <joint name='trolley_hitch_joint' type='revolute'>
+        <parent>hitch_link</parent>
+        <child>trolley_base_link</child>
+        <pose relative_to="hitch_link">-0.200 0 -0.1075 0 0 0</pose>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit>
+            <lower>-1.57</lower>
+            <upper>1.57</upper>
+          </limit>
+          <dynamics>
+            <damping>0.02</damping>
+            <friction>0.0</friction>
+          </dynamics>
+        </axis>
+      </joint>
+
+      <!-- Trolley Base (Origin at front-center pivot hole) -->
+      <link name='trolley_base_link'>
+        <pose relative_to="trolley_hitch_joint"/>
+        <!-- Visual lubang pivot di depan tengah trolley -->
+        <visual name="trolley_pivot_hole_visual">
+          <pose>0 0 0 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.025</radius>
+              <length>0.050</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.15 0.15 0.15 1.0</ambient>
+            <diffuse>0.25 0.25 0.25 1.0</diffuse>
+          </material>
+        </visual>
+        <visual name="trolley_base_link_visual">
+          <pose>-${tr_base_length/2} 0 0 0 0 0</pose>
           <geometry>
             <mesh>
-              <uri>file://${tr_XACRO_DIR}/meshes/trolley_caster.stl</uri>
+              <uri>file://${tr_XACRO_DIR}/meshes/trolley_frame.stl</uri>
               <scale>0.001 0.001 0.001</scale>
             </mesh>
           </geometry>
           <material>
-            <ambient>0.3 0.3 0.3 1.0</ambient>
-            <diffuse>0.7 0.7 0.7 1.0</diffuse>
+            <ambient>0 0.4 0.5 1</ambient>
+            <diffuse>0 0.4 0.5 1</diffuse>
           </material>
         </visual>
-        <collision name="${prefix}_link_collision">
-          <pose relative_to="${prefix}_link">0 0 0 ${pi/2} 0 0</pose>
+        <collision name="trolley_base_link_collision">
+          <pose>-${tr_base_length/2} 0 0 0 0 0</pose>
           <geometry>
-            <cylinder>
-              <radius>${tr_caster_radius}</radius>
-              <length>${tr_caster_width}</length>
-            </cylinder>
+            <box><size>
+              ${tr_base_length} ${tr_base_width} ${tr_base_height}
+            </size></box>
           </geometry>
           <surface><friction><ode>
             <mu>0.0001</mu>
             <mu2>0.0001</mu2>
           </ode></friction></surface>
         </collision>
-        <xacro:tr_cylinder_inertia m="${tr_caster_mass}" r="${tr_caster_radius}" h="${tr_caster_width}"/>
+        <inertial>
+          <pose>-${tr_base_length/2} 0 0 ${pi/2} 0 ${pi/2}</pose>
+          <mass>${tr_base_mass}</mass>
+          <inertia>
+            <ixx>${(tr_base_mass/12) * (tr_base_length*tr_base_length + tr_base_height*tr_base_height)}</ixx>
+            <ixy>0.0</ixy>
+            <ixz>0.0</ixz>
+            <iyy>${(tr_base_mass/12) * (tr_base_width*tr_base_width + tr_base_height*tr_base_height)}</iyy>
+            <iyz>0.0</iyz>
+            <izz>${(tr_base_mass/12) * (tr_base_width*tr_base_width + tr_base_length*tr_base_length)}</izz>
+          </inertia>
+        </inertial>
       </link>
-      <joint name="${prefix}_joint" type="fixed">
+
+      <!-- Trolley Footprint (Origin at front-center, ground projection) -->
+      <link name='trolley_base_footprint'>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>0.001</mass>
+          <inertia><ixx>0.000001</ixx><iyy>0.000001</iyy><izz>0.000001</izz>
+                   <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+      </link>
+      <joint name='tr_base_joint' type='fixed'>
         <parent>trolley_base_link</parent>
-        <child>${prefix}_link</child>
-        <pose relative_to="trolley_base_link">${x_reflect*tr_caster_xoff} ${y_reflect*tr_caster_yoff} ${-tr_caster_zoff} 0 0 0</pose>
+        <child>trolley_base_footprint</child>
+        <pose relative_to="trolley_base_link">0.0 0.0 ${-(tr_wheel_radius+tr_wheel_zoff)} 0 0 0</pose>
       </joint>
-    </xacro:macro>
 
-    <xacro:if value="$(arg include_trolley)">
-    <!-- Hitch joint: revolute (Pivot, trailer steers passively) atau
-         fixed (Fixed tow, trailer terkunci) — ditentukan arg hitch_type -->
-    <joint name='trolley_hitch_joint' type='$(arg hitch_type)'>
-      <parent>hitch_link</parent>
-      <child>trolley_base_link</child>
-      <!-- z=-0.1075: lower trolley so casters touch ground
-           robot settled z = wheel_radius(0.079) + wheel_zoff(0.231) = 0.310m
-           trolley settled z = caster_radius(0.0675) + caster_zoff(0.135) = 0.2025m
-           delta = 0.2025 - 0.310 = -0.1075m -->
-      <pose relative_to="hitch_link">-0.650 0 -0.1075 0 0 0</pose>
-      <xacro:if value="${hitch_type_val == 'revolute'}">
-      <axis>
-        <xyz>0 0 1</xyz>
-        <limit>
-          <lower>-1.047</lower>
-          <upper>1.047</upper>
-        </limit>
-        <dynamics>
-          <damping>0.5</damping>
-        </dynamics>
-      </axis>
-      </xacro:if>
-    </joint>
+      <!-- Pallet (Origin coincident with front-center, mesh placed over frame) -->
+      <link name='pallet_link'>
+        <pose relative_to="pallet_joint"/>
+        <visual name="pallet_link_visual">
+          <pose>-${tr_base_length/2} 0 0 0 0 0</pose>
+          <geometry>
+            <mesh>
+              <uri>file://${tr_XACRO_DIR}/meshes/trolley_pallet.stl</uri>
+              <scale>0.001 0.001 0.001</scale>
+            </mesh>
+          </geometry>
+        </visual>
+        <collision name="pallet_link_collision">
+          <pose>-${tr_base_length/2} 0 0 0 0 0</pose>
+          <geometry>
+            <box><size>
+              ${tr_pallet_length} ${tr_pallet_width} ${tr_pallet_height}
+            </size></box>
+          </geometry>
+        </collision>
+        <inertial>
+          <pose>-${tr_base_length/2} 0 0 ${pi/2} 0 ${pi/2}</pose>
+          <mass>${tr_pallet_mass}</mass>
+          <inertia>
+            <ixx>${(tr_pallet_mass/12) * (tr_pallet_length*tr_pallet_length + tr_pallet_height*tr_pallet_height)}</ixx>
+            <ixy>0.0</ixy>
+            <ixz>0.0</ixz>
+            <iyy>${(tr_pallet_mass/12) * (tr_pallet_width*tr_pallet_width + tr_pallet_height*tr_pallet_height)}</iyy>
+            <iyz>0.0</iyz>
+            <izz>${(tr_pallet_mass/12) * (tr_pallet_width*tr_pallet_width + tr_pallet_length*tr_pallet_length)}</izz>
+          </inertia>
+        </inertial>
+      </link>
+      <joint name='pallet_joint' type='fixed'>
+        <parent>trolley_base_link</parent>
+        <child>pallet_link</child>
+        <pose relative_to="trolley_base_link">0 0 ${tr_pallet_zoff} 0 0 0</pose>
+      </joint>
 
-    <!-- Trolley Base -->
-    <link name='trolley_base_link'>
-      <pose relative_to="trolley_hitch_joint"/>
-      <visual name="trolley_base_link_visual">
-        <geometry>
-          <mesh>
-            <uri>file://${tr_XACRO_DIR}/meshes/trolley_frame.stl</uri>
-            <scale>0.001 0.001 0.001</scale>
-          </mesh>
-        </geometry>
-        <material>
-          <ambient>0 0.4 0.5 1</ambient>
-          <diffuse>0 0.4 0.5 1</diffuse>
-        </material>
-      </visual>
-      <collision name="trolley_base_link_collision">
-        <geometry>
-          <box><size>
-            ${tr_base_length} ${tr_base_width} ${tr_base_height}
-          </size></box>
-        </geometry>
-        <surface><friction><ode>
-          <mu>0.0001</mu>
-          <mu2>0.0001</mu2>
-        </ode></friction></surface>
-      </collision>
-      <xacro:tr_box_inertia m="${tr_base_mass}" w="${tr_base_width}" l="${tr_base_length}" h="${tr_base_height}"/>
-    </link>
+      <!-- Passive rear wheels (roda belakang pasif / trailing unactuated, digerakkan murni oleh traksi fisik saat ditarik) -->
+      <xacro:tr_wheel_pivot prefix="trolley_wheel_l" x_reflect="-1" y_reflect="1" />
+      <xacro:tr_wheel_pivot prefix="trolley_wheel_r" x_reflect="-1" y_reflect="-1" />
 
-    <!-- Trolley Footprint -->
-    <link name='trolley_base_footprint'>
-      <xacro:tr_box_inertia m="${tr_base_mass}" w="${tr_base_width}" l="${tr_base_length}" h="${tr_base_height}"/>
-    </link>
-    <joint name='tr_base_joint' type='fixed'>
-      <parent>trolley_base_link</parent>
-      <child>trolley_base_footprint</child>
-      <pose relative_to="trolley_base_link">0.0 0.0 ${-(tr_wheel_radius+tr_wheel_zoff)} 0 0 0</pose>
-    </joint>
+      <!-- Caster wheels -->
+      <xacro:tr_caster_wheel_pivot prefix="trolley_caster_l" x_reflect="1" y_reflect="1" />
+      <xacro:tr_caster_wheel_pivot prefix="trolley_caster_r" x_reflect="1" y_reflect="-1" />
 
-    <!-- Pallet -->
-    <link name='pallet_link'>
-      <pose relative_to="pallet_joint"/>
-      <visual name="pallet_link_visual">
-        <geometry>
-          <mesh>
-            <uri>file://${tr_XACRO_DIR}/meshes/trolley_pallet.stl</uri>
-            <scale>0.001 0.001 0.001</scale>
-          </mesh>
-        </geometry>
-      </visual>
-      <collision name="pallet_link_collision">
-        <geometry>
-          <box><size>
-            ${tr_pallet_length} ${tr_pallet_width} ${tr_pallet_height}
-          </size></box>
-        </geometry>
-      </collision>
-      <xacro:tr_box_inertia m="${tr_pallet_mass}" w="${tr_pallet_width}" l="${tr_pallet_length}" h="${tr_pallet_height}"/>
-    </link>
-    <joint name='pallet_joint' type='fixed'>
-      <parent>trolley_base_link</parent>
-      <child>pallet_link</child>
-      <pose relative_to="trolley_base_link">0 0 ${tr_pallet_zoff} 0 0 0</pose>
-    </joint>
+    </xacro:if>
 
-    <!-- Drive wheels -->
-    <xacro:tr_wheel prefix="trolley_wheel_l" x_reflect="-1" y_reflect="1" />
-    <xacro:tr_wheel prefix="trolley_wheel_r" x_reflect="-1" y_reflect="-1" />
+    <!-- ============================================================
+         B. MODEL TROLLEY FIXED JOINT (hitch_type == 'fixed' / model lama)
+         - Menempel langsung ke belakang robot tanpa tongkat pengait (x = -0.650)
+         - trolley_base_link berpusat di tengah badan trolley (0 0 0)
+         - Sendi roda dan caster bertipe fixed (model lama)
+         ============================================================ -->
+    <xacro:unless value="${hitch_type_val == 'revolute'}">
 
-    <!-- Caster wheels -->
-    <xacro:tr_caster_wheel prefix="trolley_caster_l" x_reflect="1" y_reflect="1" />
-    <xacro:tr_caster_wheel prefix="trolley_caster_r" x_reflect="1" y_reflect="-1" />
+      <!-- Trolley wheel macro (model lama: fixed joint) -->
+      <xacro:macro name="tr_wheel_fixed" params="prefix x_reflect y_reflect">
+        <link name="${prefix}_link">
+          <pose relative_to="${prefix}_joint"/>
+          <visual name="${prefix}_link_visual">
+            <pose relative_to="${prefix}_link">0 0 0 0 0 ${(y_reflect-1)*pi/2}</pose>
+            <geometry>
+              <mesh>
+                <uri>file://${tr_XACRO_DIR}/meshes/trolley_wheel.stl</uri>
+                <scale>0.001 0.001 0.001</scale>
+              </mesh>
+            </geometry>
+            <material>
+              <ambient>0.3 0.3 0.3 1.0</ambient>
+              <diffuse>0.7 0.7 0.7 1.0</diffuse>
+            </material>
+          </visual>
+          <collision name="${prefix}_link_collision">
+            <pose relative_to="${prefix}_link">0 0 0 ${pi/2} 0 0</pose>
+            <geometry>
+              <cylinder>
+                <radius>${tr_wheel_radius}</radius>
+                <length>${tr_wheel_width}</length>
+              </cylinder>
+            </geometry>
+            <surface><friction><ode>
+              <fdir1>1 0 0</fdir1>
+              <mu>0.01</mu>
+              <mu2>3.5</mu2>   <!-- grip lateral dinaikkan: trailer meluruskan diri (anti over-bend) -->
+            </ode></friction></surface>
+          </collision>
+          <xacro:tr_cylinder_inertia m="${tr_wheel_mass}" r="${tr_wheel_radius}" h="${tr_wheel_width}"/>
+        </link>
+        <joint name="${prefix}_joint" type="fixed">
+          <parent>trolley_base_link</parent>
+          <child>${prefix}_link</child>
+          <pose relative_to="trolley_base_link">${x_reflect*tr_wheel_xoff} ${y_reflect*tr_wheel_yoff} ${-tr_wheel_zoff} 0 0 0</pose>
+        </joint>
+      </xacro:macro>
+
+      <!-- Trolley caster wheel macro (model lama: fixed joint, cylinder collision) -->
+      <xacro:macro name="tr_caster_wheel_fixed" params="prefix x_reflect y_reflect">
+        <link name="${prefix}_link">
+          <pose relative_to="${prefix}_joint"/>
+          <visual name="${prefix}_link_visual">
+            <geometry>
+              <mesh>
+                <uri>file://${tr_XACRO_DIR}/meshes/trolley_caster.stl</uri>
+                <scale>0.001 0.001 0.001</scale>
+              </mesh>
+            </geometry>
+            <material>
+              <ambient>0.3 0.3 0.3 1.0</ambient>
+              <diffuse>0.7 0.7 0.7 1.0</diffuse>
+            </material>
+          </visual>
+          <collision name="${prefix}_link_collision">
+            <pose relative_to="${prefix}_link">0 0 0 ${pi/2} 0 0</pose>
+            <geometry>
+              <cylinder>
+                <radius>${tr_caster_radius}</radius>
+                <length>${tr_caster_width}</length>
+              </cylinder>
+            </geometry>
+            <surface><friction><ode>
+              <mu>0.0001</mu>
+              <mu2>0.0001</mu2>
+            </ode></friction></surface>
+          </collision>
+          <xacro:tr_cylinder_inertia m="${tr_caster_mass}" r="${tr_caster_radius}" h="${tr_caster_width}"/>
+        </link>
+        <joint name="${prefix}_joint" type="fixed">
+          <parent>trolley_base_link</parent>
+          <child>${prefix}_link</child>
+          <pose relative_to="trolley_base_link">${x_reflect*tr_caster_xoff} ${y_reflect*tr_caster_yoff} ${-tr_caster_zoff} 0 0 0</pose>
+        </joint>
+      </xacro:macro>
+
+      <!-- Hitch joint (model lama: fixed joint, pose x = -0.650) -->
+      <joint name='trolley_hitch_joint' type='fixed'>
+        <parent>hitch_link</parent>
+        <child>trolley_base_link</child>
+        <pose relative_to="hitch_link">-0.650 0 -0.1075 0 0 0</pose>
+      </joint>
+
+      <!-- Trolley Base (model lama: origin di tengah badan trolley) -->
+      <link name='trolley_base_link'>
+        <pose relative_to="trolley_hitch_joint"/>
+        <visual name="trolley_base_link_visual">
+          <geometry>
+            <mesh>
+              <uri>file://${tr_XACRO_DIR}/meshes/trolley_frame.stl</uri>
+              <scale>0.001 0.001 0.001</scale>
+            </mesh>
+          </geometry>
+          <material>
+            <ambient>0 0.4 0.5 1</ambient>
+            <diffuse>0 0.4 0.5 1</diffuse>
+          </material>
+        </visual>
+        <collision name="trolley_base_link_collision">
+          <geometry>
+            <box><size>
+              ${tr_base_length} ${tr_base_width} ${tr_base_height}
+            </size></box>
+          </geometry>
+          <surface><friction><ode>
+            <mu>0.0001</mu>
+            <mu2>0.0001</mu2>
+          </ode></friction></surface>
+        </collision>
+        <xacro:tr_box_inertia m="${tr_base_mass}" w="${tr_base_width}" l="${tr_base_length}" h="${tr_base_height}"/>
+      </link>
+
+      <!-- Trolley Footprint (model lama) -->
+      <link name='trolley_base_footprint'>
+        <xacro:tr_box_inertia m="${tr_base_mass}" w="${tr_base_width}" l="${tr_base_length}" h="${tr_base_height}"/>
+      </link>
+      <joint name='tr_base_joint' type='fixed'>
+        <parent>trolley_base_link</parent>
+        <child>trolley_base_footprint</child>
+        <pose relative_to="trolley_base_link">0.0 0.0 ${-(tr_wheel_radius+tr_wheel_zoff)} 0 0 0</pose>
+      </joint>
+
+      <!-- Pallet (model lama) -->
+      <link name='pallet_link'>
+        <pose relative_to="pallet_joint"/>
+        <visual name="pallet_link_visual">
+          <geometry>
+            <mesh>
+              <uri>file://${tr_XACRO_DIR}/meshes/trolley_pallet.stl</uri>
+              <scale>0.001 0.001 0.001</scale>
+            </mesh>
+          </geometry>
+        </visual>
+        <collision name="pallet_link_collision">
+          <geometry>
+            <box><size>
+              ${tr_pallet_length} ${tr_pallet_width} ${tr_pallet_height}
+            </size></box>
+          </geometry>
+        </collision>
+        <xacro:tr_box_inertia m="${tr_pallet_mass}" w="${tr_pallet_width}" l="${tr_pallet_length}" h="${tr_pallet_height}"/>
+      </link>
+      <joint name='pallet_joint' type='fixed'>
+        <parent>trolley_base_link</parent>
+        <child>pallet_link</child>
+        <pose relative_to="trolley_base_link">0 0 ${tr_pallet_zoff} 0 0 0</pose>
+      </joint>
+
+      <!-- Drive wheels (model lama) -->
+      <xacro:tr_wheel_fixed prefix="trolley_wheel_l" x_reflect="-1" y_reflect="1" />
+      <xacro:tr_wheel_fixed prefix="trolley_wheel_r" x_reflect="-1" y_reflect="-1" />
+
+      <!-- Caster wheels (model lama) -->
+      <xacro:tr_caster_wheel_fixed prefix="trolley_caster_l" x_reflect="1" y_reflect="1" />
+      <xacro:tr_caster_wheel_fixed prefix="trolley_caster_r" x_reflect="1" y_reflect="-1" />
+
+    </xacro:unless>
 
     </xacro:if>
 

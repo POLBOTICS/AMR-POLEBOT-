@@ -1,0 +1,3 @@
+[submodule "src/tongyi_canopen_driver"]
+	path = src/tongyi_canopen_driver
+	url = https://github.com/MiraeNK/tongyi_canopen_driver.git
