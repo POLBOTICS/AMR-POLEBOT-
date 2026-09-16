@@ -1,0 +1,335 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-14T00:00:00Z",
+  "title": "Design System: POLEBOT Navigation",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "displayName": "Primary",
+        "role": "primary",
+        "tonalRamp": [
+          "oklch(15% 0.1105 261.98)",
+          "oklch(25% 0.1105 261.98)",
+          "oklch(37% 0.1105 261.98)",
+          "oklch(49% 0.1105 261.98)",
+          "oklch(61% 0.1105 261.98)",
+          "oklch(73% 0.1105 261.98)",
+          "oklch(85% 0.1105 261.98)",
+          "oklch(95% 0.1105 261.98)"
+        ]
+      },
+      "action": {
+        "displayName": "Action",
+        "role": "primary",
+        "tonalRamp": [
+          "oklch(15% 0.0956 258.79)",
+          "oklch(25% 0.0956 258.79)",
+          "oklch(37% 0.0956 258.79)",
+          "oklch(49% 0.0956 258.79)",
+          "oklch(61% 0.0956 258.79)",
+          "oklch(73% 0.0956 258.79)",
+          "oklch(85% 0.0956 258.79)",
+          "oklch(95% 0.0956 258.79)"
+        ]
+      },
+      "action-hover": {
+        "displayName": "Action Hover",
+        "role": "primary",
+        "tonalRamp": [
+          "oklch(15% 0.1038 257.81)",
+          "oklch(25% 0.1038 257.81)",
+          "oklch(37% 0.1038 257.81)",
+          "oklch(49% 0.1038 257.81)",
+          "oklch(61% 0.1038 257.81)",
+          "oklch(73% 0.1038 257.81)",
+          "oklch(85% 0.1038 257.81)",
+          "oklch(95% 0.1038 257.81)"
+        ]
+      },
+      "selected": {
+        "displayName": "Selected",
+        "role": "primary",
+        "tonalRamp": [
+          "oklch(15% 0.0649 262.00)",
+          "oklch(25% 0.0649 262.00)",
+          "oklch(37% 0.0649 262.00)",
+          "oklch(49% 0.0649 262.00)",
+          "oklch(61% 0.0649 262.00)",
+          "oklch(73% 0.0649 262.00)",
+          "oklch(85% 0.0649 262.00)",
+          "oklch(95% 0.0649 262.00)"
+        ]
+      },
+      "canvas": {
+        "displayName": "Canvas",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.0085 264.38)",
+          "oklch(25% 0.0085 264.38)",
+          "oklch(37% 0.0085 264.38)",
+          "oklch(49% 0.0085 264.38)",
+          "oklch(61% 0.0085 264.38)",
+          "oklch(73% 0.0085 264.38)",
+          "oklch(85% 0.0085 264.38)",
+          "oklch(95% 0.0085 264.38)"
+        ]
+      },
+      "surface": {
+        "displayName": "Surface",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.0120 264.34)",
+          "oklch(25% 0.0120 264.34)",
+          "oklch(37% 0.0120 264.34)",
+          "oklch(49% 0.0120 264.34)",
+          "oklch(61% 0.0120 264.34)",
+          "oklch(73% 0.0120 264.34)",
+          "oklch(85% 0.0120 264.34)",
+          "oklch(95% 0.0120 264.34)"
+        ]
+      },
+      "pane-heading": {
+        "displayName": "Pane Heading",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.0135 267.09)",
+          "oklch(25% 0.0135 267.09)",
+          "oklch(37% 0.0135 267.09)",
+          "oklch(49% 0.0135 267.09)",
+          "oklch(61% 0.0135 267.09)",
+          "oklch(73% 0.0135 267.09)",
+          "oklch(85% 0.0135 267.09)",
+          "oklch(95% 0.0135 267.09)"
+        ]
+      },
+      "border": {
+        "displayName": "Border",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.0165 266.47)",
+          "oklch(25% 0.0165 266.47)",
+          "oklch(37% 0.0165 266.47)",
+          "oklch(49% 0.0165 266.47)",
+          "oklch(61% 0.0165 266.47)",
+          "oklch(73% 0.0165 266.47)",
+          "oklch(85% 0.0165 266.47)",
+          "oklch(95% 0.0165 266.47)"
+        ]
+      },
+      "text-primary": {
+        "displayName": "Text Primary",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.0058 264.53)",
+          "oklch(25% 0.0058 264.53)",
+          "oklch(37% 0.0058 264.53)",
+          "oklch(49% 0.0058 264.53)",
+          "oklch(61% 0.0058 264.53)",
+          "oklch(73% 0.0058 264.53)",
+          "oklch(85% 0.0058 264.53)",
+          "oklch(95% 0.0058 264.53)"
+        ]
+      },
+      "text-secondary": {
+        "displayName": "Text Secondary",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.0183 264.46)",
+          "oklch(25% 0.0183 264.46)",
+          "oklch(37% 0.0183 264.46)",
+          "oklch(49% 0.0183 264.46)",
+          "oklch(61% 0.0183 264.46)",
+          "oklch(73% 0.0183 264.46)",
+          "oklch(85% 0.0183 264.46)",
+          "oklch(95% 0.0183 264.46)"
+        ]
+      },
+      "text-dim": {
+        "displayName": "Text Dim",
+        "role": "neutral",
+        "tonalRamp": [
+          "oklch(15% 0.0204 262.98)",
+          "oklch(25% 0.0204 262.98)",
+          "oklch(37% 0.0204 262.98)",
+          "oklch(49% 0.0204 262.98)",
+          "oklch(61% 0.0204 262.98)",
+          "oklch(73% 0.0204 262.98)",
+          "oklch(85% 0.0204 262.98)",
+          "oklch(95% 0.0204 262.98)"
+        ]
+      },
+      "ready": {
+        "displayName": "Ready",
+        "role": "primary",
+        "tonalRamp": [
+          "oklch(15% 0.1809 145.62)",
+          "oklch(25% 0.1809 145.62)",
+          "oklch(37% 0.1809 145.62)",
+          "oklch(49% 0.1809 145.62)",
+          "oklch(61% 0.1809 145.62)",
+          "oklch(73% 0.1809 145.62)",
+          "oklch(85% 0.1809 145.62)",
+          "oklch(95% 0.1809 145.62)"
+        ]
+      },
+      "danger": {
+        "displayName": "Danger",
+        "role": "primary",
+        "tonalRamp": [
+          "oklch(15% 0.2046 26.96)",
+          "oklch(25% 0.2046 26.96)",
+          "oklch(37% 0.2046 26.96)",
+          "oklch(49% 0.2046 26.96)",
+          "oklch(61% 0.2046 26.96)",
+          "oklch(73% 0.2046 26.96)",
+          "oklch(85% 0.2046 26.96)",
+          "oklch(95% 0.2046 26.96)"
+        ]
+      },
+      "warning": {
+        "displayName": "Warning",
+        "role": "primary",
+        "tonalRamp": [
+          "oklch(15% 0.1401 79.91)",
+          "oklch(25% 0.1401 79.91)",
+          "oklch(37% 0.1401 79.91)",
+          "oklch(49% 0.1401 79.91)",
+          "oklch(61% 0.1401 79.91)",
+          "oklch(73% 0.1401 79.91)",
+          "oklch(85% 0.1401 79.91)",
+          "oklch(95% 0.1401 79.91)"
+        ]
+      },
+      "focus": {
+        "displayName": "Focus",
+        "role": "primary",
+        "tonalRamp": [
+          "oklch(15% 0.0839 258.54)",
+          "oklch(25% 0.0839 258.54)",
+          "oklch(37% 0.0839 258.54)",
+          "oklch(49% 0.0839 258.54)",
+          "oklch(61% 0.0839 258.54)",
+          "oklch(73% 0.0839 258.54)",
+          "oklch(85% 0.0839 258.54)",
+          "oklch(95% 0.0839 258.54)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "body": {
+        "displayName": "Interface body",
+        "purpose": "Dense controls and explanatory copy."
+      },
+      "telemetry": {
+        "displayName": "Telemetry",
+        "purpose": "Pose values and coordinate readouts."
+      }
+    },
+    "shadows": [
+      {
+        "name": "teleop-floating",
+        "value": "0 8px 32px rgba(0,0,0,0.5)",
+        "purpose": "Inherited floating teleoperation overlay only."
+      }
+    ],
+    "motion": [
+      {
+        "name": "control-transition",
+        "value": "all 0.15s",
+        "purpose": "Toolbar and button transitions; disabled by reduced-motion preference."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact-desktop",
+        "value": "1150px"
+      },
+      {
+        "name": "stacked",
+        "value": "850px"
+      },
+      {
+        "name": "single-column",
+        "value": "450px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Send goal",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Explicit action after goal preview.",
+      "html": "<button class=\"ds-send\">Send goal</button>",
+      "css": ".ds-send{font-family:Inter,sans-serif;font-size:12px;width:100%;padding:10px;border:0;border-radius:4px;background:#42659b;color:white;font-weight:600;cursor:pointer}.ds-send:hover{background:#527bb7}.ds-send:focus-visible{outline:2px solid #a7caff;outline-offset:3px;}.ds-send:active{background:#42659b}.ds-send:disabled{opacity:.4;cursor:not-allowed}"
+    },
+    {
+      "name": "Cancel navigation",
+      "kind": "button",
+      "description": "Request cancellation of the current action.",
+      "html": "<button class=\"ds-cancel\">Cancel navigation</button>",
+      "css": ".ds-cancel{font-family:Inter,sans-serif;font-size:12px;width:100%;padding:11px;border:1px solid rgba(248,81,73,.4);border-radius:4px;background:rgba(248,81,73,.1);color:var(--red,#f85149);font-weight:600;cursor:pointer}.ds-cancel:hover{background:rgba(248,81,73,.2)}.ds-cancel:focus-visible{outline:2px solid #a7caff;outline-offset:3px;}.ds-cancel:active{background:rgba(248,81,73,.25)}"
+    },
+    {
+      "name": "Heading field",
+      "kind": "input",
+      "refersTo": "heading-field",
+      "description": "Numeric yaw adjustment for the preview.",
+      "html": "<label class=\"ds-heading\">Heading (\u00b0)<input type=\"number\" value=\"90\" aria-label=\"Heading in degrees\"></label>",
+      "css": ".ds-heading{font-family:Inter,sans-serif;font-size:12px;display:flex;align-items:center;gap:20px;color:var(--text-secondary,#b0b6c2)}.ds-heading input{width:78px;background:var(--bg-primary,#17191d);color:var(--text-primary,#eceef2);border:1px solid var(--border,#383c45);border-radius:3px;padding:5px 7px}.ds-heading input:hover{border-color:#91b8ff}.ds-heading input:focus-visible{outline:2px solid #a7caff;outline-offset:3px;}"
+    },
+    {
+      "name": "Workspace tabs",
+      "kind": "nav",
+      "description": "Header navigation with selected blue underline.",
+      "html": "<nav class=\"ds-tabs\" aria-label=\"Workspace\"><button>Mapping</button><button aria-current=\"page\">Navigation</button><button>System</button></nav>",
+      "css": ".ds-tabs{display:flex;gap:8px}.ds-tabs button{font:500 13px Inter,sans-serif;background:transparent;border:0;border-bottom:2px solid transparent;padding:6px 12px;color:var(--text-secondary,#b0b6c2);cursor:pointer}.ds-tabs button[aria-current]{color:var(--cyan,#91b8ff);border-bottom-color:var(--cyan,#91b8ff)}.ds-tabs button:hover{color:var(--text-primary,#eceef2)}.ds-tabs button:focus-visible{outline:2px solid #a7caff;outline-offset:3px;}"
+    },
+    {
+      "name": "Ready status",
+      "kind": "chip",
+      "description": "Text and color communicate lifecycle readiness.",
+      "html": "<span class=\"ds-ready\">Active</span>",
+      "css": ".ds-ready{font:600 10px Inter,sans-serif;padding:2px 8px;border-radius:10px;background:rgba(63,185,80,.2);color:var(--green,#3fb950);border:1px solid rgba(63,185,80,.4)}"
+    },
+    {
+      "name": "Display layer",
+      "kind": "custom",
+      "description": "Layer checkbox, scene swatch, and topic label.",
+      "html": "<label class=\"ds-layer\"><input type=\"checkbox\" checked><i></i><span>Laser scan<code>/scan</code></span></label>",
+      "css": ".ds-layer{font-family:Inter,sans-serif;font-size:12px;display:flex;gap:9px;align-items:center;min-height:45px;color:var(--text-primary,#eceef2);cursor:pointer}.ds-layer input{accent-color:#779fdf;width:14px;height:14px}.ds-layer input:focus-visible{outline:2px solid #a7caff;outline-offset:3px;}.ds-layer i{width:9px;height:9px;border-radius:2px;background:#ff5555}.ds-layer code{display:block;font:10px monospace;color:var(--text-secondary,#b0b6c2);margin-top:4px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Navigation Workbench",
+    "overview": "A dense, dark operating workspace organized around the calibrated 3D scene. Quiet charcoal surfaces and restrained blue controls keep the robot, map, scan, and costmap signals legible. This description records the implemented RViz/Foxglove-inspired direction; it does not introduce a new brand identity.",
+    "keyCharacteristics": [
+      "Dense operating controls around a dominant scene.",
+      "Flat, separated panes with independently scrollable controls.",
+      "Explicit visual feedback before and after navigation commands."
+    ],
+    "rules": [
+      {
+        "name": "The Data Palette Rule",
+        "body": "Scene colors encode data and must not be replaced by the control accent. The RViz cost ramp covers values 1\u201398 from blue toward red, with cyan at 99 and magenta at 100. Global and local costmap opacity default to 0.30 and 0.65. Their sliders affect rendering only. The visible-cost threshold defaults to 1 and must not change real inflation widths.",
+        "section": "colors"
+      },
+      {
+        "name": "The Preview Rule",
+        "body": "Click-hold-drag selects position and yaw. Pointer release completes the preview; only the explicit Send action dispatches a navigation goal.",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "Do keep scene data visually distinct from control-state colors.",
+      "Do retain visible focus and textual status alongside status colors.",
+      "Do retain the separate Send action after goal preview.",
+      "Do show navigation actions before display settings when the workspace stacks."
+    ],
+    "donts": [
+      "Don't alter the established viewer orientation or robot/LiDAR calibration for visual polish.",
+      "Don't describe the minimum visible cost slider as a Nav2 inflation setting.",
+      "Don't use synthetic fixture data as evidence of a working robot connection."
+    ]
+  }
+}

@@ -35,27 +35,6 @@ def generate_launch_description():
         }.items(),
     )
 
-    # =================== IMU =============================
-    imu_node = Node(
-        package='imu_tools',
-        executable='imu_filter_madgwick_node',
-        name='imu_filter',
-        output='screen',
-        parameters=[{
-            'use_sim_time': use_sim_time,
-            'use_mag': False,
-            'publish_tf': False,
-            'world_frame': 'enu',
-            'gain': 0.1,
-            'zeta': 0.0,
-            'fixed_frame': 'base_link',
-        }],
-        remappings=[
-            ('/imu/data_raw', '/imu/data_raw'),
-            ('/imu/data', '/imu/data'),
-        ],
-    )
-
     # =================== Camera ==========================
     camera_node = Node(
         package='v4l2_camera',
@@ -79,6 +58,5 @@ def generate_launch_description():
         DeclareLaunchArgument('lidar_ip',    default_value='192.168.0.1',
                               description='Autonics LSC IP address'),
         lidar_launch,
-        imu_node,
         camera_node,
     ])

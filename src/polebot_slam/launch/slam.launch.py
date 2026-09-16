@@ -75,22 +75,23 @@ def generate_launch_description():
     )
 
     # =================== SLAM Toolbox ===================
-    slam_node = Node(
-        package='slam_toolbox',
-        executable='async_slam_toolbox_node',
-        name='slam_toolbox',
-        output='screen',
-        parameters=[
+    # online_async_launch.py handles the Lifecycle node transitions correctly
+    slam_node = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
             PathJoinSubstitution([
+                FindPackageShare('slam_toolbox'),
+                'launch',
+                'online_async_launch.py'
+            ])
+        ]),
+        launch_arguments={
+            'use_sim_time': use_sim_time,
+            'slam_params_file': PathJoinSubstitution([
                 FindPackageShare('polebot_slam'),
                 'config',
-                'slam_toolbox_params.yaml',
-            ]),
-            {
-                'use_sim_time': use_sim_time,
-                'mode': mode,
-            },
-        ],
+                'slam_toolbox_params.yaml'
+            ])
+        }.items(),
     )
 
     # =================== RViz2 ===================

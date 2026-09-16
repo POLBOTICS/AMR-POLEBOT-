@@ -42,6 +42,11 @@ def generate_launch_description():
         }.items(),
     )
 
+    declare_launch_lidar = DeclareLaunchArgument(
+        'launch_lidar', default_value='true',
+        description='Launch Autonics LSC LiDAR')
+    launch_lidar = LaunchConfiguration('launch_lidar')
+
     # 2. SLAM Stack (includes LiDAR, SLAM Toolbox, and RViz)
     # We use the existing slam.launch.py from polebot_slam
     slam_launch = IncludeLaunchDescription(
@@ -54,13 +59,14 @@ def generate_launch_description():
         ]),
         launch_arguments={
             'use_sim_time': use_sim_time,
-            'launch_lidar': 'true',
+            'launch_lidar': launch_lidar,
             'use_rviz': 'true',
         }.items(),
     )
 
     return LaunchDescription([
         declare_use_sim_time,
+        declare_launch_lidar,
         
         # Bring up URDF and transforms immediately
         robot_description_launch,

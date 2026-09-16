@@ -16,7 +16,7 @@ def generate_launch_description():
     trajectory_mode = LaunchConfiguration('trajectory_mode')
 
     polebot_control_share = get_package_share_directory("polebot_control")
-    polebot_desc_share = get_package_share_directory("polebot_amr_description")
+    polebot_desc_share = get_package_share_directory("polebot_description")
     ros_gz_sim_share = get_package_share_directory("ros_gz_sim")
 
     world_path = os.path.join(polebot_control_share, "worlds", "straight_track.world.sdf")

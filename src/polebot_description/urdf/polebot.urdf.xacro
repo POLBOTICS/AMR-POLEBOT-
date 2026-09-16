@@ -2,12 +2,12 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="polebot">
 
   <!-- ======================================================== -->
-  <!--  POLEBOT — AMR Differential Drive Robot                  -->
+  <!--  POLEBOT - AMR Differential Drive Robot                  -->
   <!--  Politeknik Manufaktur Bandung                           -->
   <!-- ======================================================== -->
 
   <xacro:include filename="$(find polebot_description)/urdf/materials.xacro"/>
-
+  <xacro:include filename="$(find polebot_description)/urdf/polebot.gazebo.xacro"/>
   <!-- =================== ROBOT PARAMETERS =================== -->
   <!-- Base dimensions (from CAD) -->
   <xacro:property name="base_length"   value="1.172"/>
@@ -174,7 +174,7 @@
 
   <!-- =================== SENSORS ============================ -->
   <!-- LiDAR frame -->
-  <link name="lidar_link">
+  <link name="laser">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
@@ -194,10 +194,10 @@
     </inertial>
   </link>
 
-  <joint name="lidar_joint" type="fixed">
+  <joint name="laser_joint" type="fixed">
     <parent link="base_link"/>
-    <child  link="lidar_link"/>
-    <origin xyz="${lidar_xoff} 0 ${lidar_zoff}" rpy="0 0 -${pi/2}"/>
+    <child  link="laser"/>
+    <origin xyz="${lidar_xoff} 0 ${lidar_zoff}" rpy="0 0 ${-pi/2}"/>
   </joint>
 
   <!-- IMU frame -->

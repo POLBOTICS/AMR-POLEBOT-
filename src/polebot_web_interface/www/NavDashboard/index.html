@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POLEBOT — Navigation Dashboard</title>
+    <meta name="description" content="POLEBOT AMR Navigation Control Dashboard">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    
+    <!-- 3D Viewer Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+    
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="styles.css?v=1.0.1">
+</head>
+<body>
+
+<!-- TELEOP OVERLAY (Global) -->
+<div id="teleop-overlay" style="display: none;">
+    <div class="teleop-header">
+        <span>🎮 Manual Teleop</span>
+        <button class="close-btn" onclick="toggleTeleop()">✕</button>
+    </div>
+    <div class="teleop-body">
+        <div class="teleop-speed-controls" id="teleop-speed-controls">
+            <button class="speed-btn active" id="btn-speed-slow" onclick="setTeleopSpeed(0.5, 1.0, 'btn-speed-slow')">🐢 Slow</button>
+            <button class="speed-btn" id="btn-speed-norm" onclick="setTeleopSpeed(1.0, 2.0, 'btn-speed-norm')">🚶 Normal</button>
+            <button class="speed-btn" id="btn-speed-fast" onclick="setTeleopSpeed(1.5, 3.0, 'btn-speed-fast')">🐇 Fast</button>
+        </div>
+        <div class="joystick-container">
+            <canvas id="joystick-canvas" width="160" height="160"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- ── HEADER ── -->
+<div id="header">
+    <div class="header-left">
+        <div class="logo-icon" aria-hidden="true">P</div>
+        <div>
+            <h1>POLEBOT</h1>
+            <div class="subtitle">Navigation workspace · POLMAN Bandung</div>
+        </div>
+        <div class="tabs">
+            <button class="tab-btn active" id="tab-nav" onclick="switchTab('nav')">Navigation</button>
+            <button class="tab-btn" id="tab-slam" onclick="switchTab('slam')">SLAM Mapping</button>
+            <button class="tab-btn" id="tab-system" onclick="switchTab('system')">System Control</button>
+        </div>
+    </div>
+    <div class="header-right">
+        <div id="ws-badge" class="badge badge-disconnected">
+            <div class="badge-dot"></div>
+            <span id="ws-label">Disconnected</span>
+        </div>
+    </div>
+</div>
+
+<!-- ── MAIN ── -->
+<div id="main">
+    <aside id="display-panel" aria-label="Scene displays">
+        <div class="pane-heading">Displays <span>Live scene</span></div>
+        <div class="display-section"><label class="field-label">Fixed frame <code>map</code></label>
+            <p class="panel-note">Positions in metres · Angles in degrees</p></div>
+        <div class="display-section" id="section-scene-layers"><h2>Scene layers</h2>
+            <label class="layer-row"><input id="layer-map" type="checkbox" checked onchange="setLayer('map', this.checked)"><span>Map<code>/map</code></span><i class="layer-swatch map-swatch"></i></label>
+            <label class="layer-row"><input id="layer-robot" type="checkbox" checked onchange="setLayer('robot', this.checked)"><span>Robot model<code>/robot_pose_web</code></span><i class="layer-swatch robot-swatch"></i></label>
+            <label class="layer-row"><input id="layer-scan" type="checkbox" checked onchange="setLayer('scan', this.checked)"><span>Laser scan<code>/scan</code></span><i class="layer-swatch scan-swatch"></i></label>
+            <label class="layer-row"><input id="layer-path" type="checkbox" checked onchange="setLayer('path', this.checked)"><span>Global path<code>/plan</code></span><i class="layer-swatch path-swatch"></i></label>
+            <label class="layer-row"><input id="layer-grid" type="checkbox" checked onchange="setLayer('grid', this.checked)"><span>Grid<code>1 m spacing</code></span></label>
+        </div>
+        <div class="display-section" id="section-costmaps"><h2>Costmaps</h2>
+            <label class="layer-row"><input type="checkbox" id="cb-global-costmap" onchange="toggleGlobalCostmap()"><span>Global costmap<code>/global_costmap/costmap</code></span><i class="layer-swatch global-swatch"></i></label>
+            <label class="range-row">Opacity<input aria-label="Global costmap opacity" type="range" min="0" max="1" step="0.05" value="0.3" oninput="setCostmapOpacity('global', this.value)"></label><div class="costmap-meta"><span id="global-extent">Waiting for grid size</span><span id="global-frame-status">Waiting for frame</span></div>
+            <label class="layer-row"><input type="checkbox" id="cb-local-costmap" onchange="toggleLocalCostmap()"><span>Local costmap<code>/local_costmap/costmap</code></span><i class="layer-swatch local-swatch"></i></label>
+            <label class="range-row">Opacity<input aria-label="Local costmap opacity" type="range" min="0" max="1" step="0.05" value="0.65" oninput="setCostmapOpacity('local', this.value)"></label><div class="costmap-meta"><span id="local-extent">Waiting for grid size</span><span id="local-frame-status">Waiting for frame</span></div>
+        </div>
+        <div class="display-section" id="section-cost-display"><h2>Cost display</h2>
+            <div class="cost-legend" aria-label="RViz cost colors"><span class="cost-ramp"></span><span>Low → high inflation</span><i class="inscribed-swatch"></i><span>Inscribed (99)</span><i class="lethal-swatch"></i><span>Lethal obstacle (100)</span></div>
+            <label class="detail-control">Minimum visible cost<input type="range" min="1" max="98" value="1" aria-label="Minimum visible cost" oninput="setCostmapDetail(this.value)"></label>
+            <div id="costmap-detail-value" class="panel-note">All costs · RViz</div>
+            <p class="panel-note">Raise this to show a narrower inflation band. Display only; Nav2 keeps the full safety margin.</p>
+        </div>
+        <div class="display-section" id="section-zone-editor">
+            <h2>🛡️ Zone Editor (Filters)</h2>
+            <div style="display: flex; gap: 4px; margin-bottom: 6px;">
+                <button class="tool-btn active" id="btn-zone-keepout" onclick="setZoneType('keepout')" title="Draw Restricted Area">🚫 Restricted</button>
+                <button class="tool-btn" id="btn-zone-speed" onclick="setZoneType('speed')" title="Draw Speed Limit Area">⚠️ Speed Limit</button>
+                <button class="tool-btn" id="btn-zone-free" onclick="setZoneType('free')" title="Clear Zone">⬜ Clear</button>
+            </div>
+            <div style="display: flex; gap: 4px; margin-bottom: 6px;">
+                <button class="tool-btn active" id="btn-zone-shape-pencil" onclick="setZoneShape('pencil')" title="Freehand Pencil">🖌️ Pencil</button>
+                <button class="tool-btn" id="btn-zone-shape-rect" onclick="setZoneShape('rect')" title="Draw Filled Box">██ Box</button>
+            </div>
+            <label class="range-row" style="padding-left: 0;">
+                <span>Brush Size</span>
+                <input type="range" id="zone-brush-size" min="1" max="25" value="5" oninput="document.getElementById('zone-brush-size-val').textContent = this.value + ' px'">
+                <span id="zone-brush-size-val" style="font-size:11px; width: 35px; text-align: right;">5 px</span>
+            </label>
+            <div style="display: flex; gap: 4px; margin-top: 6px;">
+                <button class="tool-btn" onclick="undoZoneEdit()" id="btn-zone-undo" disabled title="Undo (Ctrl+Z)">↩️ Undo</button>
+                <button class="tool-btn" onclick="redoZoneEdit()" id="btn-zone-redo" disabled title="Redo (Ctrl+Y)">↪️ Redo</button>
+                <button class="tool-btn" onclick="resetZoneEdit()" style="color:#ff8888;" title="Reset back to original">🔄 Reset</button>
+            </div>
+            <div style="margin-top: 10px;">
+                <button class="btn-primary" onclick="saveZones()" style="width:100%; margin-top:6px; background: linear-gradient(135deg, #1f6feb, #238636); padding: 8px; font-size: 11px;">
+                    💾 Save Zones & Apply
+                </button>
+                <div id="zone-edit-status" class="panel-note" style="margin-top: 4px;">Ready to draw zones</div>
+            </div>
+        </div>
+        <div class="display-section" id="section-map-editor">
+            <h2>🎨 Map Editor (GIMP Tools)</h2>
+            <div style="display: flex; gap: 4px; margin-bottom: 6px;">
+                <button class="tool-btn active" id="btn-edit-val-wall" onclick="setMapEditVal(100)" title="Draw Wall (Black/100)">⬛ Wall</button>
+                <button class="tool-btn" id="btn-edit-val-free" onclick="setMapEditVal(0)" title="Clear/Free (White/0)">⬜ Free</button>
+                <button class="tool-btn" id="btn-edit-val-unknown" onclick="setMapEditVal(-1)" title="Set Unknown (Grey/-1)">🌫️ Unknown</button>
+            </div>
+            <div style="display: flex; gap: 4px; margin-bottom: 6px;">
+                <button class="tool-btn active" id="btn-edit-shape-pencil" onclick="setMapEditShape('pencil')" title="Freehand Pencil">🖌️ Pencil</button>
+                <button class="tool-btn" id="btn-edit-shape-line" onclick="setMapEditShape('line')" title="Draw Line">📏 Line</button>
+                <button class="tool-btn" id="btn-edit-shape-rect" onclick="setMapEditShape('rect')" title="Draw Filled Box">██ Box</button>
+            </div>
+            <label class="range-row" style="padding-left: 0;">
+                <span>Brush Size</span>
+                <input type="range" id="edit-brush-size" min="1" max="25" value="5" oninput="document.getElementById('brush-size-val').textContent = this.value + ' px'">
+                <span id="brush-size-val" style="font-size:11px; width: 35px; text-align: right;">5 px</span>
+            </label>
+            <div style="display: flex; gap: 4px; margin-top: 6px;">
+                <button class="tool-btn" onclick="undoMapEdit()" id="btn-edit-undo" disabled title="Undo (Ctrl+Z)">↩️ Undo</button>
+                <button class="tool-btn" onclick="redoMapEdit()" id="btn-edit-redo" disabled title="Redo (Ctrl+Y)">↪️ Redo</button>
+                <button class="tool-btn" onclick="resetMapEdit()" style="color:#ff8888;" title="Reset back to original map">🔄 Reset</button>
+            </div>
+            <div style="margin-top: 10px;">
+                <input type="text" id="edited-map-name-input" value="polebot_map_edited" style="width:100%; padding:6px; background:rgba(0,0,0,0.3); border:1px solid var(--border); color:white; border-radius:4px; font-size:11px; font-family:'JetBrains Mono', monospace;" placeholder="Map name">
+                <button class="btn-primary" onclick="saveEditedMap()" style="width:100%; margin-top:6px; background: linear-gradient(135deg, #1f6feb, #238636); padding: 8px; font-size: 11px;">
+                    💾 Save Edited Map (.pgm + .yaml)
+                </button>
+                <div id="edit-map-status" class="panel-note" style="margin-top: 4px;">Ready to edit map</div>
+            </div>
+        </div>
+        <div class="display-section"><h2>Data health</h2><div id="data-health" class="panel-note">Waiting for ROS messages…</div></div>
+        <div class="display-section display-help"><h2>Viewport controls</h2><p>Drag to orbit · Right-drag to pan<br>Scroll to zoom · F to fit map<br>Esc to leave placement tool</p></div>
+    </aside>
+
+    <!-- MAP AREA -->
+    <div id="map-container">
+        <div class="pane-heading">3D view <span id="map-topic-label">/map · Waiting for data</span></div>
+        <div id="map-toolbar" role="toolbar" aria-label="Navigation tools">
+            <button class="tool-btn active" id="btn-view-mode" onclick="setMode('view')">Interact</button>
+            <button class="tool-btn" id="btn-edit-mode" onclick="setMode('edit_map')">🎨 Edit Map</button>
+            <button class="tool-btn" id="btn-edit-zone-mode" onclick="setMode('edit_zone')">🛡️ Edit Zones</button>
+            <button class="tool-btn" id="btn-init-mode" onclick="setMode('initial_pose')">2D Pose Estimate</button>
+            <button class="tool-btn" id="btn-goal-mode" onclick="setMode('goal')">Nav2 Goal</button>
+            <div class="tool-separator"></div>
+            <button class="tool-btn" onclick="resetView()" title="Fit map (F)">Fit map</button>
+            <button class="tool-btn" id="btn-follow" onclick="toggleFollow()" aria-pressed="false">Follow robot</button>
+        </div>
+
+        <div id="map-canvas-wrap">
+            <div id="viewer-3d" style="display: block; width: 100%; height: 100%;"></div>
+
+            <!-- Placeholder when no map -->
+            <div id="map-overlay">
+                <div class="map-placeholder">
+                    
+                    <div class="placeholder-title" id="overlay-title">Select Map to Load</div>
+                    <div class="placeholder-sub" id="overlay-sub">Choose a static map to begin AMCL and Navigation</div>
+                    
+                    <div id="map-select-ui" style="margin-top: 24px; display: flex; gap: 10px; align-items: center; justify-content: center;">
+                        <select aria-label="Saved map" id="map-dropdown" style="background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); padding: 8px 12px; border-radius: 6px; font-family: 'Inter', sans-serif; width: 200px;">
+                            <option value="">Loading maps...</option>
+                        </select>
+                        <button class="btn-primary" onclick="loadSelectedMap()" style="padding: 8px 16px;">Load Map</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="viewport-footer"><span id="coord-readout">Cursor: —</span><span id="interaction-hint">Drag to orbit · Right-drag to pan · Scroll to zoom</span></div>
+        <div id="workspace-message" role="status" aria-live="polite"></div>
+    </div>
+
+    <!-- RIGHT PANEL - NAVIGATION -->
+    <div id="panel-nav" class="panel">
+        <div class="pane-heading">Navigation <span>Nav2</span></div>
+        <!-- Nav Status -->
+        <div class="panel-section">
+            <div class="section-title">Navigation action</div>
+            <div id="nav-status-display">
+                <div class="nav-status-label">Current State</div>
+                <div class="nav-status-value status-idle" id="nav-status-value">IDLE</div>
+                <div class="nav-status-sub" id="nav-status-sub">Waiting for Nav2...</div>
+                <div class="feedback-row"><span>Distance <b id="nav-distance">—</b></span><span>ETA <b id="nav-eta">—</b></span><span>Recoveries <b id="nav-recoveries">—</b></span></div>
+            </div>
+        </div>
+
+
+
+        <!-- Nav2 Status -->
+        <div class="panel-section">
+            <div class="section-title">Lifecycle nodes</div>
+            <div class="node-list">
+                <div class="node-item" id="node-map_server">
+                    <span class="node-name">map_server</span>
+                    <span class="node-status status-checking">Checking</span>
+                </div>
+                <div class="node-item" id="node-amcl">
+                    <span class="node-name">amcl</span>
+                    <span class="node-status status-checking">Checking</span>
+                </div>
+                <div class="node-item" id="node-bt_navigator">
+                    <span class="node-name">bt_navigator</span>
+                    <span class="node-status status-checking">Checking</span>
+                </div>
+                <div class="node-item" id="node-planner">
+                    <span class="node-name">planner_server</span>
+                    <span class="node-status status-checking">Checking</span>
+                </div>
+                <div class="node-item" id="node-controller">
+                    <span class="node-name">controller_server</span>
+                    <span class="node-status status-checking">Checking</span>
+                </div>
+            </div>
+            <button class="check-btn" onclick="checkNav2Status()">↻ Recheck Status</button>
+        </div>
+
+        <!-- Robot Pose -->
+        <div class="panel-section">
+            <div class="section-title">Robot pose</div>
+            <div class="pose-grid">
+                <div class="pose-item">
+                    <div class="pose-label">X (m)</div>
+                    <div class="pose-value" id="pose-x">—</div>
+                </div>
+                <div class="pose-item">
+                    <div class="pose-label">Y (m)</div>
+                    <div class="pose-value" id="pose-y">—</div>
+                </div>
+                <div class="pose-item">
+                    <div class="pose-label">Yaw (°)</div>
+                    <div class="pose-value" id="pose-yaw">—</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Set Initial Pose -->
+        <div class="panel-section">
+            <div class="section-title">Initial pose</div>
+            <div class="goal-info">
+                <div class="goal-hint" id="init-hint">Hold at the robot’s location. Drag toward its front to set yaw, then release and publish.</div>
+                <div class="goal-coords" id="init-coords"></div><label class="heading-input">Heading (°)<input id="init-yaw" type="number" value="0" step="1" onchange="editHeading('initial_pose', this.value)"></label>
+            </div>
+            <button class="btn-primary" id="btn-send-init" onclick="sendInitialPose()" disabled>
+                Publish initial pose
+            </button>
+        </div>
+
+        <!-- Set Goal -->
+        <div class="panel-section">
+            <div class="section-title">Navigation goal</div>
+            <div class="goal-info">
+                <div class="goal-hint" id="goal-hint">Hold at the destination. Drag to set the arrival heading, then release and send the goal.</div>
+                <div class="goal-coords" id="goal-coords"></div><label class="heading-input">Heading (°)<input id="goal-yaw" type="number" value="0" step="1" onchange="editHeading('goal', this.value)"></label>
+            </div>
+            <button class="btn-primary" id="btn-send-goal" onclick="sendGoal()" disabled>
+                Send navigation goal
+            </button>
+            <button class="btn-danger" id="btn-cancel" onclick="cancelNav()" disabled>
+                Cancel navigation
+            </button>
+        </div>
+
+    </div><!-- /panel-nav -->
+
+    <!-- RIGHT PANEL - SLAM -->
+    <div id="panel-slam" class="panel" style="display: none;">
+        <!-- SLAM Status -->
+        <div class="panel-section">
+            <div class="section-title">📡 SLAM Status</div>
+            <div class="node-list">
+                <div class="node-item" id="node-slam_toolbox">
+                    <span class="node-name">slam_toolbox</span>
+                    <span class="node-status status-checking">Checking</span>
+                </div>
+            </div>
+            <button class="check-btn" onclick="checkSlamStatus()">↻ Recheck Status</button>
+        </div>
+
+        <!-- Map Management -->
+        <div class="panel-section">
+            <div class="section-title">💾 Map Management</div>
+            <div class="goal-info">
+                <div class="goal-hint">Save the map to the workspace directory on the robot.</div>
+                <input type="text" id="map-name-input" value="polebot_map" style="width:100%; margin-top:8px; padding:8px; background:rgba(0,0,0,0.3); border:1px solid var(--border); color:white; border-radius:6px; font-size:12px; font-family:'JetBrains Mono', monospace;" placeholder="Map name (e.g. polebot_map)">
+            </div>
+            <button class="btn-primary" id="btn-save-map" onclick="saveMap()" disabled>
+                💾 Save Map
+            </button>
+            <button class="btn-primary" id="btn-serialize-map" onclick="serializeMap()" style="background: linear-gradient(135deg, #238636, #2ea043);" disabled>
+                📦 Serialize Map (PoseGraph)
+            </button>
+        </div>
+    </div><!-- /panel-slam -->
+
+    <!-- RIGHT PANEL - SYSTEM -->
+    <div id="panel-system" class="panel" style="display: none;">
+        
+        <!-- Category 1: Turn On System -->
+        <div class="system-category">
+            <h3 class="category-header">Turn On System</h3>
+            
+            <div class="panel-section">
+                <div class="section-title">⚡ CAN Bus & Motor</div>
+                <div class="goal-info">
+                    <div class="goal-hint">Start or stop the Tongyi CAN-Open driver and motor nodes.</div>
+                </div>
+                <button class="btn-primary" id="btn-start-motor" onclick="apiControl('launch/motor')" style="background: linear-gradient(135deg, #238636, #2ea043);">
+                    ▶ Start Motor Bringup
+                </button>
+                <button class="btn-danger" id="btn-stop-motor" onclick="apiControl('kill/motor')">
+                    ⏹ Stop Motor Bringup
+                </button>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-title">🗺️ LiDAR & SLAM</div>
+                <div class="goal-info">
+                    <div class="goal-hint">Start or stop the Autonics LiDAR and SLAM Toolbox.</div>
+                </div>
+                <button class="btn-primary" id="btn-start-slam" onclick="apiControl('launch/slam')" style="background: linear-gradient(135deg, #238636, #2ea043);">
+                    ▶ Start SLAM Bringup
+                </button>
+                <button class="btn-danger" id="btn-stop-slam" onclick="apiControl('kill/slam')">
+                    ⏹ Stop SLAM Bringup
+                </button>
+            </div>
+            
+            <div class="panel-section">
+                <div class="section-title">🤖 Autonomous Navigation (Nav2)</div>
+                <div class="goal-info">
+                    <div class="goal-hint">Stop the Navigation 2 stack (to start it, use the map loader in the Navigation tab).</div>
+                </div>
+                <button class="btn-danger" id="btn-stop-nav" onclick="apiControl('kill/nav')">
+                    ⏹ Stop Navigation (Nav2)
+                </button>
+            </div>
+        </div>
+
+        <!-- Category 2: Manual Controller -->
+        <div class="system-category">
+            <h3 class="category-header">Manual Controller</h3>
+            
+            <div class="panel-section">
+                <div class="section-title">🎮 Manual Control</div>
+                <div class="goal-info">
+                    <div class="goal-hint">Enable on-screen joystick overlay for teleoperation.</div>
+                </div>
+                <button class="btn-primary" id="btn-toggle-teleop" onclick="toggleTeleop()" style="background: linear-gradient(135deg, #1f6feb, #388bfd);">
+                    🕹️ Show Teleop Overlay
+                </button>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-title">🎮 External Peripherals</div>
+                <div class="goal-info">
+                    <div class="goal-hint" id="gamepad-status-text">Status: 🔴 No gamepad detected</div>
+                </div>
+                <button class="btn-primary" id="btn-toggle-gamepad" onclick="toggleGamepadInput()" style="background: linear-gradient(135deg, #a371f7, #8957e5);" disabled>
+                    ❌ Enable Physical Gamepad
+                </button>
+            </div>
+        </div>
+
+        <!-- Category 3: System Status -->
+        <div class="system-category">
+            <h3 class="category-header">System Status</h3>
+            
+            <div class="panel-section">
+                <div class="section-title">📊 Live Topic Diagnostics</div>
+                <div class="pose-grid">
+                    <div class="pose-item">
+                        <div class="pose-label">/tf (Transforms)</div>
+                        <div class="pose-value" id="hz-tf" style="color: var(--cyan)">0 Hz</div>
+                    </div>
+                    <div class="pose-item">
+                        <div class="pose-label">/scan (LiDAR)</div>
+                        <div class="pose-value" id="hz-scan" style="color: var(--cyan)">0 Hz</div>
+                    </div>
+                    <div class="pose-item">
+                        <div class="pose-label">/map (SLAM/Nav)</div>
+                        <div class="pose-value" id="hz-map" style="color: var(--cyan)">0 Hz</div>
+                    </div>
+                    <div class="pose-item">
+                        <div class="pose-label">/odom (Odometry)</div>
+                        <div class="pose-value" id="hz-odom" style="color: var(--cyan)">0 Hz</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+    </div><!-- /panel-system -->
+</div><!-- /main -->
+
+<!-- Custom Script -->
+<script src="workspace.js?v=1.0.1"></script>
+<script src="app.js?v=1.0.1"></script>
+
+</body>
+</html>

@@ -39,12 +39,12 @@
     left:
       node_id: 11
       command_sign: 1
-      feedback_sign: -1
+      feedback_sign: 1
 
     right:
       node_id: 10
       command_sign: -1
-      feedback_sign: 1
+      feedback_sign: -1
 
     # ── POLEBOT Differential Drive Geometry ───────────────────────────────────
     # wheel_radius: measured tyre rolling radius (metres) — from polebot URDF

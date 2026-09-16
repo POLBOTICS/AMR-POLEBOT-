@@ -1,10 +1,13 @@
 cmake_minimum_required(VERSION 3.8)
-project(polebot_bringup)
+project(polebot_description)
 
 find_package(ament_cmake REQUIRED)
 
-install(
-  DIRECTORY launch config
+install(DIRECTORY
+  urdf
+  meshes
+  rviz
+  launch
   DESTINATION share/${PROJECT_NAME}
 )
 

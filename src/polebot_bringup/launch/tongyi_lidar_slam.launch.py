@@ -19,15 +19,14 @@ def generate_launch_description():
     teleop = LaunchConfiguration('teleop')
     use_rviz = LaunchConfiguration('use_rviz')
 
+    pkg_polebot_description = get_package_share_directory('polebot_description')
     xacro_file = os.path.join(
-        pkg_polebot_amr_description,
-        'src',
-        'description',
-        'polebot_amr_description.sdf'
+        pkg_polebot_description,
+        'urdf',
+        'polebot.urdf.xacro'
     )
     robot_description_config = xacro.process_file(
         xacro_file,
-        mappings={'package_path': pkg_polebot_amr_description}
     ).toxml()
 
     rviz_config = os.path.join(
@@ -106,7 +105,7 @@ def generate_launch_description():
             package='tf2_ros',
             executable='static_transform_publisher',
             name='lidar_to_corrected_tf',
-            arguments=['0', '0', '0', '-1.5708', '0', '0', 'lidar_link', 'lidar_link_corrected'],
+            arguments=['--x', '0', '--y', '0', '--z', '0', '--yaw', '-1.5708', '--frame-id', 'lidar_link', '--child-frame-id', 'lidar_link_corrected'],
         ),
 
         Node(

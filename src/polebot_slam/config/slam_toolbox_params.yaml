@@ -20,14 +20,14 @@ slam_toolbox:
     # Autonics LSC via lsc_ros2_driver publishes at ~3 Hz due to TCP packet
     # reassembly drop. Set minimum_time_interval slightly below 1/3Hz = 0.333s
     # so every arriving scan is processed.
-    minimum_time_interval: 0.3      # [s]  accept scan if ≥ 0.3s since last
+    minimum_time_interval: 0.0      # [s]  accept all scans
     transform_publish_period: 0.05  # [s]  20 Hz TF publish
-    map_update_interval: 3.0        # [s]  map rasterise interval
+    map_update_interval: 1.0        # [s]  map rasterise interval
     transform_timeout: 0.5          # [s]  TF lookup timeout
     tf_buffer_duration: 30.0        # [s]
     stack_size_to_use: 40000000
     throttle_scans: 1               # process every scan
-    debug_logging: false
+    debug_logging: true
     enable_interactive_mode: true
 
     # ── Map resolution ────────────────────────────────────────────────────────
@@ -41,7 +41,7 @@ slam_toolbox:
 
     # ── Scan matching ─────────────────────────────────────────────────────────
     use_scan_matching: true
-    trust_odom_with_scan_matching: true
+    trust_odom_with_scan_matching: false
     use_scan_barycenter: true
     scan_buffer_size: 10
     scan_buffer_maximum_scan_distance: 10.0

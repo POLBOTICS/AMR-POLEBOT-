@@ -104,6 +104,17 @@ def generate_launch_description():
         condition=IfCondition(use_motor),
     )
 
+    # =================== Web Interface ======================
+    web_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            PathJoinSubstitution([
+                FindPackageShare('polebot_web_interface'),
+                'launch',
+                'web_interface.launch.py',
+            ])
+        ]),
+        launch_arguments={'use_sim_time': use_sim_time}.items(),
+    )
 
 
     return LaunchDescription([
@@ -128,5 +139,6 @@ def generate_launch_description():
         # Launch navigation or SLAM
         TimerAction(period=4.0, actions=[slam_launch, nav_launch]),
 
-
+        # Launch Web Interface
+        TimerAction(period=5.0, actions=[web_launch]),
     ])
