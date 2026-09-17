@@ -21,7 +21,7 @@
         </RecoveryNode>
       </RateController>
       <RecoveryNode number_of_retries="1" name="FollowPath">
-        <FollowPath path="{path}" controller_id="{selected_controller}" error_code_id="{follow_path_error_code}"/>
+        <FollowPath path="{path}" controller_id="{selected_controller}" goal_checker_id="general_goal_checker" progress_checker_id="progress_checker" error_code_id="{follow_path_error_code}"/>
         <Sequence name="SingleBackupAndTerminate">
           <Wait wait_duration="0.5"/>
           <BackUp backup_dist="0.12" backup_speed="0.05"/>

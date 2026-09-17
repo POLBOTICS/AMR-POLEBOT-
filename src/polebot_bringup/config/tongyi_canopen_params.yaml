@@ -47,11 +47,11 @@
       feedback_sign: 1
 
     # ── POLEBOT Differential Drive Geometry ───────────────────────────────────
-    # wheel_radius: measured tyre rolling radius (metres) — from polebot URDF
-    # wheel_base:   lateral distance between contact patches (metres)
-    # NOTE: Update these after physical calibration on the actual robot!
-    wheel_radius: 0.065    # URDF value — recalibrate with ruler test
-    wheel_base: 0.35       # URDF value — recalibrate with rotation test
+    # wheel_radius: measured tyre rolling radius (metres) — 0.079m (158mm tyre)
+    # wheel_base:   lateral distance between contact patches (metres) — 0.5473m calibrated (URDF 0.600m)
+    # (Previously misconfigured to 0.35m which caused a +56.4% yaw calculation error in odometry)
+    wheel_radius: 0.079
+    wheel_base: 0.5473
 
     # ── Odometry frames ────────────────────────────────────────────────────────
     odom_frame_id: odom
