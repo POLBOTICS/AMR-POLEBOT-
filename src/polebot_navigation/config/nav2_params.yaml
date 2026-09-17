@@ -50,8 +50,8 @@ bt_navigator:
     robot_base_frame: base_link
     odom_topic: /odom
     bt_loop_duration: 10
-    default_server_timeout: 20
-    wait_for_service_timeout: 1000
+    default_server_timeout: 1000
+    wait_for_service_timeout: 5000
     action_server_result_timeout: 900.0
     navigators: ["navigate_to_pose", "navigate_through_poses"]
     navigate_to_pose:
@@ -78,16 +78,19 @@ controller_server:
     min_y_velocity_threshold: 0.5
     min_theta_velocity_threshold: 0.001
     failure_tolerance: 0.3
+    current_progress_checker: "progress_checker"
+    current_goal_checker: "general_goal_checker"
     progress_checker_plugins: ["progress_checker"]
     goal_checker_plugins: ["general_goal_checker"] # "precise_goal_checker"
     controller_plugins: ["FollowPath"]
     use_realtime_priority: false
 
-    # Progress checker parameters
+    # Progress checker parameters (PoseProgressChecker verifies both linear AND angular progress)
     progress_checker:
-      plugin: "nav2_controller::SimpleProgressChecker"
-      required_movement_radius: 0.5
-      movement_time_allowance: 10.0
+      plugin: "nav2_controller::PoseProgressChecker"
+      required_movement_radius: 0.15
+      required_movement_angle: 0.08
+      movement_time_allowance: 20.0
     # Goal checker parameters
     #precise_goal_checker:
     #  plugin: "nav2_controller::SimpleGoalChecker"
@@ -98,17 +101,17 @@ controller_server:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
       xy_goal_tolerance: 0.15
-      yaw_goal_tolerance: 0.15
+      yaw_goal_tolerance: 0.20
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
       debug_trajectory_details: True
       min_vel_x: 0.0
       min_vel_y: 0.0
-      max_vel_x: 0.18
+      max_vel_x: 0.16
       max_vel_y: 0.0
       max_vel_theta: 0.22
       min_speed_xy: 0.0
-      max_speed_xy: 0.18
+      max_speed_xy: 0.16
       min_speed_theta: 0.0
       acc_lim_x: 0.4
       acc_lim_y: 0.0
@@ -134,6 +137,7 @@ controller_server:
         - PathAlign
         - PathDist
         - GoalDist
+        - RotateToGoal
       BaseObstacle.scale: 0.02
       PathAlign.scale: 32.0
       PathAlign.forward_point_distance: 0.1
@@ -339,7 +343,7 @@ velocity_smoother:
     stamp_smoothed_velocity_with_smoothing_time: False
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [0.18, 0.0, 0.22]
+    max_velocity: [0.16, 0.0, 0.22]
     min_velocity: [-0.10, 0.0, -0.22]
     max_accel: [0.4, 0.0, 0.4]
     max_decel: [-0.5, 0.0, -0.4]

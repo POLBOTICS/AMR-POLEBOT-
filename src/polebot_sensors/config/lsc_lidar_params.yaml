@@ -12,8 +12,10 @@ lsc_node:
     frame_id: "laser"
 
     # ── Range filter ──────────────────────────────────────────────────────────
-    range_min: 0.05    # [m] minimum valid range
+    range_min: 0.40    # [m] minimum valid range (filter out robot chassis)
     range_max: 25.0    # [m] maximum valid range (LSC series max)
+    angle_min: 0.0     # [deg] 0 is Right, 90 is Front
+    angle_max: 180.0   # [deg] 180 is Left (Front 180 sweep)
 
     # ── Topic ─────────────────────────────────────────────────────────────────
     pub_topic: "scan"

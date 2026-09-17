@@ -21,7 +21,9 @@ def generate_launch_description():
     use_motor        = LaunchConfiguration('use_motor')
     robot_namespace  = LaunchConfiguration('robot_namespace')
     can_interface    = LaunchConfiguration('can_interface')
+    map_yaml_file    = LaunchConfiguration('map')
 
+    declare_map             = DeclareLaunchArgument('map',             default_value='/home/mirae/Desktop/AMR-POLEBOT-WS/maps/polebot_map.yaml', description='Full path to map yaml file to load')
     declare_use_sim_time    = DeclareLaunchArgument('use_sim_time',    default_value='false',      description='Use simulation clock')
     declare_use_rviz        = DeclareLaunchArgument('use_rviz',        default_value='true',       description='Launch RViz2')
     declare_use_nav         = DeclareLaunchArgument('use_nav',         default_value='true',       description='Launch Nav2 navigation stack')
@@ -81,7 +83,10 @@ def generate_launch_description():
                 'navigation.launch.py',
             ])
         ]),
-        launch_arguments={'use_sim_time': use_sim_time}.items(),
+        launch_arguments={
+            'use_sim_time': use_sim_time,
+            'map': map_yaml_file,
+        }.items(),
         condition=IfCondition(use_nav),
     )
 
@@ -119,6 +124,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         # Declare arguments
+        declare_map,
         declare_use_sim_time,
         declare_use_rviz,
         declare_use_nav,

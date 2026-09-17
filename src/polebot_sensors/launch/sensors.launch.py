@@ -11,12 +11,14 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.conditions import IfCondition
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
+    use_camera   = LaunchConfiguration('use_camera')
     lidar_ip     = LaunchConfiguration('lidar_ip')
 
     # =================== LiDAR ===========================
@@ -51,10 +53,12 @@ def generate_launch_description():
             ('/image_raw', '/camera/image_raw'),
             ('/camera_info', '/camera/camera_info'),
         ],
+        condition=IfCondition(use_camera),
     )
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='false'),
+        DeclareLaunchArgument('use_camera', default_value='false', description='Launch camera node'),
         DeclareLaunchArgument('lidar_ip',    default_value='192.168.0.1',
                               description='Autonics LSC IP address'),
         lidar_launch,

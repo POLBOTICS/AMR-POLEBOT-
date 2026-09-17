@@ -101,7 +101,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                             'name': 'Native DWB (Standard OK)',
                             'badge': 'Standard OK',
                             'description': 'Standard Nav2 DWB Local Planner with gentle turns & single-backup goal termination',
-                            'params': {'controller': 'DWBLocalPlanner', 'max_vel_x': '0.18 m/s', 'max_vel_theta': '0.22 rad/s', 'recovery': '1x BackUp → Abort'}
+                            'params': {'controller': 'DWBLocalPlanner', 'max_vel_x': '0.16 m/s', 'max_vel_theta': '0.22 rad/s', 'recovery': '1x BackUp → Abort'}
                         },
                         {
                             'id': 'pid',
