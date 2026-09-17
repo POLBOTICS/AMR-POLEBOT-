@@ -7,14 +7,14 @@ const path = require('node:path');
 function harness() {
     const nodes = new Map();
     const element = id => {
-        if (!nodes.has(id)) nodes.set(id, { textContent: '', value: '0', disabled: false, style: {}, classList: { toggle() {}, add() {}, remove() {} }, querySelector: () => element(id + '-status') });
+        if (!nodes.has(id)) nodes.set(id, { textContent: '', value: '0', disabled: false, style: {}, classList: { toggle() {}, add() {}, remove() {} }, appendChild() {}, querySelector: () => element(id + '-status') });
         return nodes.get(id);
     };
     const sent = [];
     class Socket { static OPEN = 1; constructor() { this.readyState = 1; } send(data) { sent.push(JSON.parse(data)); } }
     const context = vm.createContext({ console, Date, Math, Number, JSON, Map, Promise, setTimeout, clearTimeout, setInterval() {}, WebSocket: Socket,
         window: { location: { hostname: 'localhost' }, addEventListener() {} }, location: { protocol: 'http:' },
-        document: { getElementById: element, querySelector: element }, navigator: {} });
+        document: { getElementById: element, querySelector: element, createElement: () => ({ appendChild() {}, classList: { add() {}, remove() {}, toggle() {} }, style: {} }) }, navigator: {} });
     for (const file of ['workspace.js', 'app.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../www/NavDashboard', file), 'utf8'), context);
     return { run: code => vm.runInContext(code, context), sent, element };
 }
@@ -121,4 +121,50 @@ test('heading edits rotate the final marker without creating a second preview', 
     assert.ok(Math.abs(direction.x)<1e-10);
     assert.equal(direction.y,1);
     assert.equal(h.run('placementArrow'),null);
+});
+test('multiple point target creates ordered waypoints, sends NavigateThroughPoses action, and cancellation targets the route action', () => {
+    const h = harness();
+    h.run('wsConnected = true; nav2Ready = true;');
+    h.run('addWaypoint(1.0, 2.0, 0); addWaypoint(3.0, 4.0, Math.PI / 2); addWaypoint(5.0, 6.0, Math.PI);');
+    assert.equal(h.run('waypoints.length'), 3);
+
+    // Remove second waypoint (index 1)
+    h.run('removeWaypoint(1);');
+    assert.equal(h.run('waypoints.length'), 2);
+    assert.equal(h.run('waypoints[0].x'), 1.0);
+    assert.equal(h.run('waypoints[1].x'), 5.0);
+
+    // Send waypoint route
+    h.run('sendWaypointRoute();');
+    const routeGoal = h.sent.find(m => m.op === 'send_action_goal' && m.action === '/navigate_through_poses');
+    assert.ok(routeGoal);
+    assert.equal(routeGoal.action_type, 'nav2_msgs/action/NavigateThroughPoses');
+    assert.equal(routeGoal.args.poses.length, 2);
+    assert.equal(routeGoal.args.poses[0].pose.position.x, 1.0);
+    assert.equal(routeGoal.args.poses[1].pose.position.x, 5.0);
+    assert.equal(h.element('nav-status-value').textContent, 'SENDING');
+
+    // Receive feedback (1 pose remaining -> navigating waypoint 2 of 2)
+    h.run(`handleMessage(${JSON.stringify({
+        op: 'action_feedback',
+        id: routeGoal.id,
+        values: { number_of_poses_remaining: 1, distance_remaining: 1.5, estimated_time_remaining: { sec: 5 } }
+    })})`);
+    assert.equal(h.run('activeWaypointIndex'), 1);
+    assert.equal(h.element('nav-status-value').textContent, 'EXECUTING');
+    assert.ok(h.element('nav-status-sub').textContent.includes('Waypoint 2 of 2'));
+
+    // Cancel route
+    h.run('cancelNav()');
+    const cancel = h.sent.at(-1);
+    assert.equal(cancel.op, 'cancel_action_goal');
+    assert.equal(cancel.id, routeGoal.id);
+    assert.equal(cancel.action, '/navigate_through_poses');
+    assert.equal(h.element('nav-status-value').textContent, 'CANCELING');
+
+    // Result: canceled
+    h.run(`handleMessage(${JSON.stringify({op: 'action_result', id: routeGoal.id, result: true, status: 5, values: {}})})`);
+    assert.equal(h.element('nav-status-value').textContent, 'CANCELED');
+    assert.equal(h.run('activeActionId'), null);
+    assert.equal(h.run('activeWaypointIndex'), -1);
 });

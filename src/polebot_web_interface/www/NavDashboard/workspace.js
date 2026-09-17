@@ -11,6 +11,7 @@ let requestCounter = 0;
 let checkingLifecycle = false;
 let slamReady = false;
 let activeActionId = null;
+let activeActionName = '/navigate_to_pose';
 let actionPhase = 'idle';
 let navigationUncertain = false;
 let robotPoseFrame = "";
@@ -64,7 +65,19 @@ function handleWorkspaceMessage(message) {
     if (message.op === 'action_feedback') {
         const feedback = message.values || {};
         if (actionPhase !== 'canceling') actionPhase = 'executing';
-        if (actionPhase !== 'canceling') setNavigationState('EXECUTING', 'Nav2 is navigating to the selected goal.', 'status-navigating');
+        if (actionPhase !== 'canceling') {
+            if (activeActionName === '/navigate_through_poses') {
+                const remaining = feedback.number_of_poses_remaining !== undefined ? feedback.number_of_poses_remaining : 0;
+                const total = typeof waypoints !== 'undefined' ? waypoints.length : 0;
+                const currentIdx = Math.max(0, total - remaining);
+                if (typeof activeWaypointIndex !== 'undefined') activeWaypointIndex = currentIdx;
+                setNavigationState('EXECUTING', `Navigating to Waypoint ${currentIdx + 1} of ${total} (${remaining} remaining)`, 'status-navigating');
+                if (typeof update3DWaypoints === 'function') update3DWaypoints();
+                if (typeof renderWaypointList === 'function') renderWaypointList();
+            } else {
+                setNavigationState('EXECUTING', 'Nav2 is navigating to the selected goal.', 'status-navigating');
+            }
+        }
         document.getElementById('nav-distance').textContent = Number.isFinite(feedback.distance_remaining) ? `${feedback.distance_remaining.toFixed(2)} m` : '—';
         document.getElementById('nav-eta').textContent = feedback.estimated_time_remaining ? `${feedback.estimated_time_remaining.sec} s` : '—';
         document.getElementById('nav-recoveries').textContent = feedback.number_of_recoveries ?? '—';
@@ -73,14 +86,28 @@ function handleWorkspaceMessage(message) {
     if (message.op === 'action_result') {
         const result = message.result !== false && message.status === 4;
         const label = result ? 'SUCCEEDED' : message.status === 5 ? 'CANCELED' : 'FAILED';
-        const detail = typeof message.values === 'string' ? message.values : message.values?.error_msg || (result ? 'Destination reached.' : message.status === 5 ? 'Nav2 confirmed cancellation.' : `Nav2 finished with status ${message.status}.`);
+        const isRoute = (activeActionName === '/navigate_through_poses');
+        const detail = typeof message.values === 'string' ? message.values : message.values?.error_msg || (result ? (isRoute ? 'All waypoints reached successfully!' : 'Destination reached.') : message.status === 5 ? 'Nav2 confirmed cancellation.' : `Nav2 finished with status ${message.status}.`);
         setNavigationState(label, detail, result ? 'status-reached' : message.status === 5 ? 'status-idle' : 'status-failed');
-        document.getElementById('goal-hint').textContent = detail;
+        if (isRoute) {
+            const hint = document.getElementById('wp-hint');
+            if (hint) hint.textContent = detail;
+            const btnStart = document.getElementById('btn-start-waypoints');
+            const btnCancel = document.getElementById('btn-cancel-waypoints');
+            if (btnStart) btnStart.disabled = (typeof waypoints !== 'undefined' ? waypoints.length === 0 : true);
+            if (btnCancel) btnCancel.disabled = true;
+        } else {
+            document.getElementById('goal-hint').textContent = detail;
+            document.getElementById('btn-cancel').disabled = true;
+        }
         activeActionId = null;
+        activeActionName = '/navigate_to_pose';
         actionPhase = 'idle';
+        if (typeof activeWaypointIndex !== 'undefined') activeWaypointIndex = -1;
         pendingGoal = null;
-        document.getElementById('btn-cancel').disabled = true;
         updateNavReadyUI();
+        if (typeof update3DWaypoints === 'function') update3DWaypoints();
+        if (typeof renderWaypointList === 'function') renderWaypointList();
         return true;
     }
     if (message.op === 'status' && message.level === 'error') {
@@ -89,9 +116,15 @@ function handleWorkspaceMessage(message) {
         if (actionPhase === 'sending') {
             setNavigationState('FAILED', detail, 'status-failed');
             activeActionId = null;
+            activeActionName = '/navigate_to_pose';
             actionPhase = 'idle';
+            if (typeof activeWaypointIndex !== 'undefined') activeWaypointIndex = -1;
             document.getElementById('btn-cancel').disabled = true;
+            const btnCancelWp = document.getElementById('btn-cancel-waypoints');
+            if (btnCancelWp) btnCancelWp.disabled = true;
             updateNavReadyUI();
+            if (typeof update3DWaypoints === 'function') update3DWaypoints();
+            if (typeof renderWaypointList === 'function') renderWaypointList();
         } else {
             setNavigationState('UNKNOWN', 'Action communication error. Await Nav2 result or reconnect to reconcile status.', 'status-checking');
         }
@@ -527,7 +560,13 @@ function installViewportControls() {
         const { x, y, yaw, mode } = placement;
         placement = null;
         if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
-        if (mode === 'goal') setGoalPose(x, y, yaw); else setInitialPose(x, y, yaw);
+        if (mode === 'goal') {
+            setGoalPose(x, y, yaw);
+        } else if (mode === 'waypoints') {
+            if (typeof addWaypoint === 'function') addWaypoint(x, y, yaw);
+        } else {
+            setInitialPose(x, y, yaw);
+        }
         updateNavReadyUI();
     });
     canvas.addEventListener('pointercancel', () => {

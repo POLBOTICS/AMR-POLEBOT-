@@ -275,6 +275,7 @@
             <button class="tool-btn" id="btn-edit-zone-mode" onclick="setMode('edit_zone')" title="Adobe Rectangle Zone Tool">🛡️ Zone Tool</button>
             <button class="tool-btn" id="btn-init-mode" onclick="setMode('initial_pose')">2D Pose Estimate</button>
             <button class="tool-btn" id="btn-goal-mode" onclick="setMode('goal')">Nav2 Goal</button>
+            <button class="tool-btn" id="btn-waypoints-mode" onclick="setMode('waypoints')" title="Multiple Point Target (Waypoint Route)">📍 Waypoints</button>
             <div class="tool-separator"></div>
             <button class="tool-btn" onclick="resetView()" title="Fit map (F)">Fit map</button>
             <button class="tool-btn" id="btn-follow" onclick="toggleFollow()" aria-pressed="false">Follow robot</button>
@@ -410,19 +411,57 @@
             </button>
         </div>
 
-        <!-- Set Goal -->
+        <!-- Navigation Goals: Single Goal vs Waypoint Route -->
         <div class="panel-section">
-            <div class="section-title">Navigation goal</div>
-            <div class="goal-info">
-                <div class="goal-hint" id="goal-hint">Hold at the destination. Drag to set the arrival heading, then release and send the goal.</div>
-                <div class="goal-coords" id="goal-coords"></div><label class="heading-input">Heading (°)<input id="goal-yaw" type="number" value="0" step="1" onchange="editHeading('goal', this.value)"></label>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div class="section-title" style="margin: 0;">Navigation target</div>
+                <div class="goal-submode-tabs">
+                    <button class="submode-tab-btn active" id="tab-submode-single" onclick="setGoalSubMode('single')" title="Single 2D Nav Goal">🎯 Single</button>
+                    <button class="submode-tab-btn" id="tab-submode-route" onclick="setGoalSubMode('waypoints')" title="Multiple Point Route">📍 Route</button>
+                </div>
             </div>
-            <button class="btn-primary" id="btn-send-goal" onclick="sendGoal()" disabled>
-                Send navigation goal
-            </button>
-            <button class="btn-danger" id="btn-cancel" onclick="cancelNav()" disabled>
-                Cancel navigation
-            </button>
+
+            <!-- Single Goal Sub-panel -->
+            <div id="subpanel-single-goal">
+                <div class="goal-info">
+                    <div class="goal-hint" id="goal-hint">Hold at the destination. Drag to set the arrival heading, then release and send the goal.</div>
+                    <div class="goal-coords" id="goal-coords"></div><label class="heading-input">Heading (°)<input id="goal-yaw" type="number" value="0" step="1" onchange="editHeading('goal', this.value)"></label>
+                </div>
+                <button class="btn-primary" id="btn-send-goal" onclick="sendGoal()" disabled>
+                    Send navigation goal
+                </button>
+                <button class="btn-danger" id="btn-cancel" onclick="cancelNav()" disabled>
+                    Cancel navigation
+                </button>
+            </div>
+
+            <!-- Waypoint Route Sub-panel -->
+            <div id="subpanel-waypoint-route" style="display: none;">
+                <div class="wp-route-header">
+                    <span class="wp-route-title">Sequential Waypoints</span>
+                    <span id="wp-count-badge" class="wp-count-badge">0 points</span>
+                </div>
+                <div class="goal-hint" id="wp-hint" style="margin-bottom: 8px;">
+                    Select <strong>📍 Waypoints</strong> tool, then click & drag on the map to place targets in order.
+                </div>
+                <div id="waypoint-list-container" class="waypoint-list-container">
+                    <div id="waypoint-list-empty" class="waypoint-list-empty">
+                        No waypoints placed yet. Click on the map in Waypoints mode to place targets.
+                    </div>
+                    <div id="waypoint-list" class="waypoint-list"></div>
+                </div>
+                <div class="wp-actions-row">
+                    <button class="btn-primary" id="btn-start-waypoints" onclick="sendWaypointRoute()" disabled style="flex: 1.8;">
+                        ▶️ Start Route
+                    </button>
+                    <button class="btn-danger" id="btn-cancel-waypoints" onclick="cancelNav()" disabled style="flex: 1.2;">
+                        ⏹️ Cancel
+                    </button>
+                    <button class="btn-secondary" id="btn-clear-waypoints" onclick="clearWaypoints()" style="flex: 1; padding: 6px;" title="Clear all waypoints">
+                        🧹 Clear
+                    </button>
+                </div>
+            </div>
         </div>
 
     </div><!-- /panel-nav -->

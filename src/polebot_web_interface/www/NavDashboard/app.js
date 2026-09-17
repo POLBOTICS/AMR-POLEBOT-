@@ -106,6 +106,7 @@ function subscribeTopics() {
     send({ op: 'subscribe', topic: '/scan', type: 'sensor_msgs/msg/LaserScan', throttle_rate: 200 });
     // Navigation action status
     send({ op: 'subscribe', topic: '/navigate_to_pose/_action/status', type: 'action_msgs/msg/GoalStatusArray', throttle_rate: 500 });
+    send({ op: 'subscribe', topic: '/navigate_through_poses/_action/status', type: 'action_msgs/msg/GoalStatusArray', throttle_rate: 500 });
     // Odom for diagnostics
     send({ op: 'subscribe', topic: '/odom', type: 'nav_msgs/msg/Odometry', throttle_rate: 200 });
 
@@ -163,7 +164,7 @@ function handleMessage(msg) {
         laserScan = msg.msg;
     } else if (msg.topic === '/odom') {
         topicCounters.odom++;
-    } else if (msg.topic === '/navigate_to_pose/_action/status') {
+    } else if (msg.topic === '/navigate_to_pose/_action/status' || msg.topic === '/navigate_through_poses/_action/status') {
         onNavStatusReceived(msg.msg);
     } else if (msg.topic.endsWith('_costmap/costmap_updates')) {
         updateCostmapRegion(msg.topic.startsWith('/global') ? 'global' : 'local', msg.msg);
@@ -382,8 +383,29 @@ function updateNavReadyUI() {
     }
 
     if (btnGoal) btnGoal.disabled = !wsConnected || !nav2Ready || !pendingGoal || !!activeActionId || navigationUncertain || currentTab !== 'nav';
-    document.getElementById('btn-send-init').disabled = !wsConnected || !pendingInitPose || !lifecycleStates.amcl || currentTab !== 'nav';
-    for (const id of ['btn-init-mode', 'btn-goal-mode']) document.getElementById(id).disabled = !wsConnected || !mapData || currentTab !== 'nav';
+    const btnInit = document.getElementById('btn-send-init');
+    if (btnInit) btnInit.disabled = !wsConnected || !pendingInitPose || !lifecycleStates.amcl || currentTab !== 'nav';
+    for (const id of ['btn-init-mode', 'btn-goal-mode', 'btn-waypoints-mode']) {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !wsConnected || !mapData || currentTab !== 'nav';
+    }
+
+    const btnStartWp = document.getElementById('btn-start-waypoints');
+    if (btnStartWp) {
+        const count = (typeof waypoints !== 'undefined') ? waypoints.length : 0;
+        btnStartWp.disabled = !wsConnected || !nav2Ready || count === 0 || !!activeActionId || navigationUncertain || currentTab !== 'nav';
+    }
+    const btnCancelWp = document.getElementById('btn-cancel-waypoints');
+    if (btnCancelWp) {
+        const isRunningWp = !!activeActionId && (typeof activeActionName !== 'undefined' && activeActionName === '/navigate_through_poses');
+        btnCancelWp.disabled = !wsConnected || !isRunningWp;
+    }
+    const btnClearWp = document.getElementById('btn-clear-waypoints');
+    if (btnClearWp) {
+        const count = (typeof waypoints !== 'undefined') ? waypoints.length : 0;
+        const isRunningWp = !!activeActionId && (typeof activeActionName !== 'undefined' && activeActionName === '/navigate_through_poses');
+        btnClearWp.disabled = !wsConnected || count === 0 || isRunningWp;
+    }
 }
 
 // ── SLAM Status Check & Map Service ───────────────────
@@ -1740,17 +1762,24 @@ function setMode(mode) {
     const btnEdit = document.getElementById('btn-edit-mode');
     const btnZone = document.getElementById('btn-edit-zone-mode');
     const btnView = document.getElementById('btn-view-mode');
+    const btnWp = document.getElementById('btn-waypoints-mode');
     if (btnGoal) btnGoal.classList.toggle('active', mode === 'goal');
     if (btnInit) btnInit.classList.toggle('active', mode === 'initial_pose');
     if (btnEdit) btnEdit.classList.toggle('active', mode === 'edit_map');
     if (btnZone) btnZone.classList.toggle('active', mode === 'edit_zone');
     if (btnView) btnView.classList.toggle('active', mode === 'view');
+    if (btnWp) btnWp.classList.toggle('active', mode === 'waypoints');
 
     const hint = document.getElementById('interaction-hint');
     if (mode === 'edit_zone') {
         if (hint) hint.textContent = '🛡️ Adobe Zone Tool: Click & drag on map to draw rectangles · Drag handles to resize · Esc to exit';
     } else if (mode === 'edit_map') {
         if (hint) hint.textContent = '🎨 Map Edit Mode: Left-drag to draw · Use sidebar tools & brush size · Esc to leave edit mode';
+    } else if (mode === 'waypoints') {
+        if (hint) hint.textContent = '📍 Waypoints Tool: Click & drag on map to add target points in sequence (1, 2, 3...) · Esc or Interact to exit';
+        if (typeof goalSubMode !== 'undefined' && goalSubMode !== 'waypoints' && typeof setGoalSubMode === 'function') {
+            setGoalSubMode('waypoints');
+        }
     } else {
         if (hint) hint.textContent = mode === 'view' ? 'Drag to orbit · Right-drag to pan · Scroll to zoom' : 'Click to place · Drag to choose heading · Esc to cancel';
     }
@@ -1916,6 +1945,7 @@ function sendGoal() {
     if (!pendingGoal || !wsConnected || !nav2Ready || activeActionId || navigationUncertain) return;
     const { x, y, yaw } = pendingGoal;
     activeActionId = `nav-${Date.now()}-${++requestCounter}`;
+    activeActionName = '/navigate_to_pose';
     actionPhase = 'sending';
     goalPose = { ...pendingGoal };
     setNavigationState('SENDING', 'Waiting for Nav2 feedback or result.', 'status-checking');
@@ -1933,13 +1963,289 @@ function sendGoal() {
             }, behavior_tree: ''
         }
     });
-
 }
+
 function cancelNav() {
     if (!wsConnected || !activeActionId) return;
     actionPhase = 'canceling';
     setNavigationState('CANCELING', 'Cancellation requested; waiting for Nav2 result.', 'status-checking');
-    send({ op: 'cancel_action_goal', id: activeActionId, action: '/navigate_to_pose' });
+    const targetAction = (typeof activeActionName !== 'undefined' && activeActionName) ? activeActionName : '/navigate_to_pose';
+    send({ op: 'cancel_action_goal', id: activeActionId, action: targetAction });
+}
+
+// ── Multiple Point Target (Waypoint Route) ────────────
+
+let goalSubMode = 'single'; // 'single' | 'waypoints'
+let waypoints = []; // [{ id, x, y, yaw }]
+let nextWpId = 1;
+let activeWaypointIndex = -1;
+let waypointsGroup3D = null;
+
+function setGoalSubMode(submode) {
+    goalSubMode = submode;
+    const tabSingle = document.getElementById('tab-submode-single');
+    const tabRoute = document.getElementById('tab-submode-route');
+    const panelSingle = document.getElementById('subpanel-single-goal');
+    const panelRoute = document.getElementById('subpanel-waypoint-route');
+
+    if (submode === 'waypoints') {
+        if (tabSingle) tabSingle.classList.remove('active');
+        if (tabRoute) tabRoute.classList.add('active');
+        if (panelSingle) panelSingle.style.display = 'none';
+        if (panelRoute) panelRoute.style.display = 'block';
+        if (interactMode !== 'waypoints') setMode('waypoints');
+    } else {
+        if (tabRoute) tabRoute.classList.remove('active');
+        if (tabSingle) tabSingle.classList.add('active');
+        if (panelRoute) panelRoute.style.display = 'none';
+        if (panelSingle) panelSingle.style.display = 'block';
+        if (interactMode === 'waypoints') setMode('view');
+    }
+    updateNavReadyUI();
+}
+
+function addWaypoint(wx, wy, yaw = 0) {
+    clearPlacementPreview();
+    const wp = {
+        id: nextWpId++,
+        x: Number(wx.toFixed(3)),
+        y: Number(wy.toFixed(3)),
+        yaw: Number(yaw.toFixed(3))
+    };
+    waypoints.push(wp);
+    renderWaypointList();
+    update3DWaypoints();
+    updateNavReadyUI();
+    const hint = document.getElementById('wp-hint');
+    if (hint) {
+        hint.textContent = `Point ${waypoints.length} added at (${wp.x.toFixed(2)}, ${wp.y.toFixed(2)}). Click again to add next, or click Start Route.`;
+    }
+}
+
+function removeWaypoint(idx) {
+    if (idx < 0 || idx >= waypoints.length) return;
+    if (activeActionId && activeActionName === '/navigate_through_poses') {
+        showNotice('Cannot delete waypoints while route is actively running. Cancel route first.');
+        return;
+    }
+    waypoints.splice(idx, 1);
+    renderWaypointList();
+    update3DWaypoints();
+    updateNavReadyUI();
+}
+
+function clearWaypoints() {
+    if (activeActionId && activeActionName === '/navigate_through_poses') {
+        showNotice('Cannot clear waypoints while route is actively running. Cancel route first.');
+        return;
+    }
+    waypoints = [];
+    activeWaypointIndex = -1;
+    renderWaypointList();
+    update3DWaypoints();
+    updateNavReadyUI();
+    const hint = document.getElementById('wp-hint');
+    if (hint) {
+        hint.textContent = 'Waypoints cleared. Select 📍 Waypoints tool to place new targets.';
+    }
+}
+
+function renderWaypointList() {
+    const emptyEl = document.getElementById('waypoint-list-empty');
+    const listEl = document.getElementById('waypoint-list');
+    const badgeEl = document.getElementById('wp-count-badge');
+    if (!listEl) return;
+
+    if (badgeEl) {
+        badgeEl.textContent = `${waypoints.length} point${waypoints.length !== 1 ? 's' : ''}`;
+    }
+
+    if (waypoints.length === 0) {
+        if (emptyEl) emptyEl.style.display = 'block';
+        listEl.style.display = 'none';
+        listEl.innerHTML = '';
+        return;
+    }
+
+    if (emptyEl) emptyEl.style.display = 'none';
+    listEl.style.display = 'flex';
+    listEl.innerHTML = '';
+
+    const isRunning = (activeActionId && activeActionName === '/navigate_through_poses');
+
+    waypoints.forEach((wp, idx) => {
+        if (typeof document.createElement !== 'function') return;
+        const item = document.createElement('div');
+        const isActive = (isRunning && activeWaypointIndex === idx);
+        const isPassed = (isRunning && activeWaypointIndex > idx);
+        item.className = `waypoint-item${isActive ? ' active-target' : ''}${isPassed ? ' passed-target' : ''}`;
+
+        const numBadge = document.createElement('div');
+        numBadge.className = 'wp-item-num';
+        numBadge.textContent = idx + 1;
+
+        const info = document.createElement('div');
+        info.className = 'wp-item-info';
+
+        const label = document.createElement('div');
+        label.className = 'wp-item-label';
+        label.textContent = `Point ${idx + 1}${isActive ? ' (Navigating...)' : isPassed ? ' (Passed)' : ''}`;
+
+        const coords = document.createElement('div');
+        coords.className = 'wp-item-coords';
+        const deg = (wp.yaw * 180 / Math.PI).toFixed(1);
+        coords.textContent = `X: ${wp.x.toFixed(2)}m · Y: ${wp.y.toFixed(2)}m · θ: ${deg}°`;
+
+        info.appendChild(label);
+        info.appendChild(coords);
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'wp-del-btn';
+        delBtn.title = 'Remove this waypoint';
+        delBtn.textContent = '🗑️';
+        delBtn.disabled = Boolean(isRunning);
+        delBtn.onclick = (e) => {
+            if (e && e.stopPropagation) e.stopPropagation();
+            removeWaypoint(idx);
+        };
+
+        if (typeof item.appendChild === 'function') {
+            item.appendChild(numBadge);
+            item.appendChild(info);
+            item.appendChild(delBtn);
+        }
+
+        if (typeof listEl.appendChild === 'function') {
+            listEl.appendChild(item);
+        }
+    });
+}
+
+function createNumberedBadgeTexture(num, isActive = false) {
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+    const canvas = document.createElement('canvas');
+    if (!canvas || typeof canvas.getContext !== 'function') return null;
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.beginPath();
+    ctx.arc(64, 64, 56, 0, 2 * Math.PI);
+    ctx.fillStyle = isActive ? 'rgba(245, 158, 11, 0.95)' : 'rgba(15, 23, 42, 0.9)';
+    ctx.fill();
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = isActive ? '#ffffff' : '#00e5ff';
+    ctx.stroke();
+
+    ctx.font = 'bold 64px sans-serif';
+    ctx.fillStyle = isActive ? '#000000' : '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(num), 64, 66);
+
+    if (typeof THREE === 'undefined' || !THREE.CanvasTexture) return null;
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    return texture;
+}
+
+function clear3DWaypoints() {
+    if (!scene3D || !waypointsGroup3D) return;
+    waypointsGroup3D.traverse(o => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) {
+            if (o.material.map) o.material.map.dispose();
+            if (Array.isArray(o.material)) o.material.forEach(m => m.dispose());
+            else o.material.dispose();
+        }
+    });
+    scene3D.remove(waypointsGroup3D);
+    waypointsGroup3D = null;
+}
+
+function update3DWaypoints() {
+    clear3DWaypoints();
+    if (!scene3D || typeof THREE === 'undefined' || waypoints.length === 0) return;
+
+    waypointsGroup3D = new THREE.Group();
+    waypointsGroup3D.name = 'waypoints_route_group';
+
+    // 1. Connecting route line
+    if (waypoints.length >= 2 && THREE.BufferGeometry && THREE.LineBasicMaterial && THREE.Line) {
+        const linePoints = waypoints.map(wp => new THREE.Vector3(wp.x, wp.y, 0.08));
+        const lineGeo = new THREE.BufferGeometry().setFromPoints(linePoints);
+        const lineMat = new THREE.LineBasicMaterial({
+            color: 0x00e5ff,
+            transparent: true,
+            opacity: 0.8,
+            linewidth: 2
+        });
+        const line = new THREE.Line(lineGeo, lineMat);
+        waypointsGroup3D.add(line);
+    }
+
+    // 2. Directional arrows and numbered badges
+    waypoints.forEach((wp, idx) => {
+        const isActive = (activeActionId && activeActionName === '/navigate_through_poses' && activeWaypointIndex === idx);
+        const arrowColor = isActive ? 0xffaa00 : 0x00e5ff;
+
+        if (THREE.ArrowHelper && THREE.Vector3) {
+            const dir = new THREE.Vector3(Math.cos(wp.yaw), Math.sin(wp.yaw), 0);
+            const origin = new THREE.Vector3(wp.x, wp.y, 0.12);
+            const arrow = new THREE.ArrowHelper(dir, origin, 0.65, arrowColor, 0.18, 0.12);
+            waypointsGroup3D.add(arrow);
+        }
+
+        const badgeTex = createNumberedBadgeTexture(idx + 1, isActive);
+        if (badgeTex && THREE.SpriteMaterial && THREE.Sprite) {
+            const spriteMat = new THREE.SpriteMaterial({ map: badgeTex, depthTest: false, depthWrite: false });
+            const sprite = new THREE.Sprite(spriteMat);
+            sprite.position.set(wp.x, wp.y, 0.35);
+            sprite.scale.set(0.38, 0.38, 1.0);
+            waypointsGroup3D.add(sprite);
+        }
+    });
+
+    scene3D.add(waypointsGroup3D);
+}
+
+function sendWaypointRoute() {
+    if (!wsConnected || !nav2Ready || activeActionId || navigationUncertain || waypoints.length === 0) return;
+    activeActionId = `nav-wp-${Date.now()}-${++requestCounter}`;
+    activeActionName = '/navigate_through_poses';
+    actionPhase = 'sending';
+    activeWaypointIndex = 0;
+
+    setNavigationState('SENDING', `Sending route with ${waypoints.length} waypoints to Nav2...`, 'status-checking');
+    const hint = document.getElementById('wp-hint');
+    if (hint) hint.textContent = `Route started (1 of ${waypoints.length}). Nav2 planning...`;
+
+    const btnCancelWp = document.getElementById('btn-cancel-waypoints');
+    if (btnCancelWp) btnCancelWp.disabled = false;
+    updateNavReadyUI();
+    update3DWaypoints();
+    renderWaypointList();
+
+    const poses = waypoints.map(wp => ({
+        header: { frame_id: 'map' },
+        pose: {
+            position: { x: wp.x, y: wp.y, z: 0 },
+            orientation: { x: 0, y: 0, z: Math.sin(wp.yaw / 2), w: Math.cos(wp.yaw / 2) }
+        }
+    }));
+
+    send({
+        op: 'send_action_goal',
+        id: activeActionId,
+        action: '/navigate_through_poses',
+        action_type: 'nav2_msgs/action/NavigateThroughPoses',
+        feedback: true,
+        args: {
+            poses: poses,
+            behavior_tree: ''
+        }
+    });
 }
 
 
@@ -1971,6 +2277,7 @@ function clearMap() {
     }
     disposeMesh(pathMesh3D);
     pathMesh3D = null;
+    clear3DWaypoints();
     // Note: We do NOT reset isNavMapLoaded here, because Nav2 might still be running!
     // The map will be re-drawn automatically by the next ROS topic message.
 }
