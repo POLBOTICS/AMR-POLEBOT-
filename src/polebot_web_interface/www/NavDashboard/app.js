@@ -2393,10 +2393,10 @@ function updateMotionUI() {
     if (grid) {
         if (motionMode.controller === 'native') {
             grid.innerHTML = `
-                <div><span>Speed:</span> <strong>0.18 m/s</strong></div>
-                <div><span>Accel:</span> <strong>0.40 m/s²</strong></div>
-                <div><span>Decel:</span> <strong>-0.50 m/s²</strong></div>
-                <div><span>Recovery:</span> <strong>Stop & BackUp</strong></div>
+                <div><span>Linear:</span> <strong>0.18 m/s</strong></div>
+                <div><span>Angular:</span> <strong>0.22 rad/s (Gentle)</strong></div>
+                <div><span>Decel:</span> <strong>-0.40 m/s²</strong></div>
+                <div><span>Recovery:</span> <strong>1x BackUp → Terminate</strong></div>
             `;
         } else if (motionMode.controller === 'pid') {
             grid.innerHTML = `

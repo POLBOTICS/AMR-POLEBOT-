@@ -1,0 +1,34 @@
+<!--
+  Custom Behavior Tree for AMR POLEBOT (Compact Indoor / Lab Testing)
+  Features:
+  - Replans path periodically at 1 Hz
+  - Controller & Planner selection support via web interface
+  - When an obstacle is detected blocking path:
+      1. Briefly pauses (0.5s) to settle chassis inertia
+      2. Backs up gently ONCE by 0.12m at 0.05m/s (safe clearance)
+      3. Clears local costmap
+      4. Immediately TERMINATES the goal (AlwaysFailure) without looping, repeating backup, or pushing forward
+-->
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <PipelineSequence name="NavigateWithReplanning">
+      <ControllerSelector selected_controller="{selected_controller}" default_controller="FollowPath" topic_name="controller_selector"/>
+      <PlannerSelector selected_planner="{selected_planner}" default_planner="GridBased" topic_name="planner_selector"/>
+      <RateController hz="1.0">
+        <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+          <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}"/>
+          <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+        </RecoveryNode>
+      </RateController>
+      <RecoveryNode number_of_retries="1" name="FollowPath">
+        <FollowPath path="{path}" controller_id="{selected_controller}" error_code_id="{follow_path_error_code}"/>
+        <Sequence name="SingleBackupAndTerminate">
+          <Wait wait_duration="0.5"/>
+          <BackUp backup_dist="0.12" backup_speed="0.05"/>
+          <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+          <AlwaysFailure/>
+        </Sequence>
+      </RecoveryNode>
+    </PipelineSequence>
+  </BehaviorTree>
+</root>
