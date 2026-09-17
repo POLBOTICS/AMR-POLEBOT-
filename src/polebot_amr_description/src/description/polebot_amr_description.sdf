@@ -48,6 +48,10 @@
     <xacro:property name="lidar_mass" value="0.314"/>
     <xacro:property name="lidar_xoff" value="0.496"/>
     <xacro:property name="lidar_zoff" value="0.040"/>
+    <xacro:property name="lidar_fov_deg" value="150.0"/> <!-- Sudut deteksi LiDAR depan < 180 deg (default 150 deg: +/- 75 deg) -->
+    <xacro:property name="lidar_min_angle" value="${-lidar_fov_deg / 2.0 * pi / 180.0}"/>
+    <xacro:property name="lidar_max_angle" value="${lidar_fov_deg / 2.0 * pi / 180.0}"/>
+    <xacro:property name="lidar_samples" value="300"/>
 
     <xacro:property name="camera_mass" value="0.123"/>
     <xacro:property name="camera_xoff" value="0.560"/>
@@ -412,16 +416,16 @@
       <sensor name="lidar" type="gpu_lidar">
         <always_on>true</always_on>
         <visualize>true</visualize>
-        <update_rate>5.0</update_rate>
+        <update_rate>15.0</update_rate>
         <topic>scan</topic>
         <gz_frame_id>lidar_link</gz_frame_id>
         <lidar>
           <scan>
             <horizontal>
-              <samples>270</samples>
+              <samples>${lidar_samples}</samples>
               <resolution>1.000000</resolution>
-              <min_angle>-2.093</min_angle>
-              <max_angle>2.093</max_angle>
+              <min_angle>${lidar_min_angle}</min_angle>
+              <max_angle>${lidar_max_angle}</max_angle>
             </horizontal>
           </scan>
           <range>

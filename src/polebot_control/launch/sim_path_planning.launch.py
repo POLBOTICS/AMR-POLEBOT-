@@ -36,6 +36,10 @@ def launch_setup(context, *args, **kwargs):
     map_mode = LaunchConfiguration('map_mode').perform(context)
     use_gazebo = LaunchConfiguration('use_gazebo').perform(context).lower() == 'true'
     auto_follow = LaunchConfiguration('auto_follow').perform(context).lower() == 'true'
+    teleop_opt = LaunchConfiguration('teleop').perform(context).lower() == 'true'
+
+    if teleop_opt and controller_type == 'smc':
+        controller_type = 'teleop'
 
     use_sim_time = use_gazebo  # True jika memakai Gazebo clock, False jika simulator mandiri (wall-clock)
 
@@ -57,7 +61,7 @@ def launch_setup(context, *args, **kwargs):
         joint_type_val = 'solo'
         mode_int = 0
 
-    act_mode = 'effort_control' if controller_type == 'smc' else 'diffdrive'
+    act_mode = 'diffdrive' if controller_type in ('pid', 'teleop') else 'effort_control'
 
     polebot_control = get_package_share_directory("polebot_control")
     polebot_desc = get_package_share_directory("polebot_amr_description")
@@ -73,8 +77,16 @@ def launch_setup(context, *args, **kwargs):
         map_yaml = os.path.join(polebot_control, "config", "test_map.yaml")
         spawn_x, spawn_y, spawn_z, spawn_yaw = "0.0", "0.0", "0.38", "0.0"
 
+    custom_map = LaunchConfiguration('map').perform(context).strip()
+    if custom_map:
+        if os.path.isabs(custom_map):
+            map_yaml = custom_map
+        else:
+            map_yaml = os.path.join(polebot_control, "config", custom_map)
+
     controllers_yaml = os.path.join(polebot_control, "config", "ros2_controllers.yaml")
     slam_params = os.path.join(polebot_control, "config", "mapper_params.yaml")
+    amcl_params = os.path.join(polebot_control, "config", "amcl_params.yaml")
 
     robot_desc_xml = xacro.process_file(
         sdf_path,
@@ -124,12 +136,6 @@ def launch_setup(context, *args, **kwargs):
             package='nav2_lifecycle_manager', executable='lifecycle_manager', name='lifecycle_manager_map',
             output='screen', parameters=[{'use_sim_time': False, 'autostart': True, 'node_names': ['map_server']}],
         )
-        map_server_configure = TimerAction(period=1.0, actions=[
-            ExecuteProcess(cmd=['ros2', 'lifecycle', 'set', 'map_server', 'configure'], output='screen'),
-        ])
-        map_server_activate = TimerAction(period=1.8, actions=[
-            ExecuteProcess(cmd=['ros2', 'lifecycle', 'set', 'map_server', 'activate'], output='screen'),
-        ])
 
         mode_selector = Node(
             package="polebot_control", executable="trajectory_mode_selector", name="trajectory_mode_selector",
@@ -171,6 +177,22 @@ def launch_setup(context, *args, **kwargs):
                     ],
                 )
                 controller_actions.append(TimerAction(period=2.5, actions=[odom_to_posearray, pid_node]))
+            elif controller_type == 'teleop':
+                pass
+
+        teleop_actions = []
+        if teleop_opt:
+            teleop_node = Node(
+                package='teleop_twist_keyboard',
+                executable='teleop_twist_keyboard',
+                name='teleop_twist_keyboard',
+                output='screen',
+                prefix='xterm -e',
+                parameters=[{'use_sim_time': False}],
+            )
+            teleop_actions.append(TimerAction(period=3.0, actions=[teleop_node]))
+
+        planning_actions = [planning_action] if controller_type != 'teleop' else []
 
         return [
             rsp_node,
@@ -178,10 +200,9 @@ def launch_setup(context, *args, **kwargs):
             kin_sim_node,
             map_server_node,
             lifecycle_manager_node,
-            map_server_configure,
-            map_server_activate,
-            planning_action,
+            *planning_actions,
             *controller_actions,
+            *teleop_actions,
         ]
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -208,7 +229,7 @@ def launch_setup(context, *args, **kwargs):
         "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
         "/model/polebot_amr/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry",
     ]
-    if controller_type == 'pid':
+    if controller_type in ('pid', 'teleop'):
         bridge_args.extend([
             "/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
         ])
@@ -218,38 +239,56 @@ def launch_setup(context, *args, **kwargs):
         arguments=bridge_args,
     )
 
+    init_x = float(spawn_x)
+    init_y = float(spawn_y)
+    init_yaw = float(spawn_yaw)
+
+    try:
+        if os.path.exists(map_yaml):
+            import yaml
+            with open(map_yaml, 'r') as f:
+                map_meta = yaml.safe_load(f)
+            orig = map_meta.get('origin', [0.0, 0.0, 0.0])
+            if init_x < orig[0] or init_y < orig[1]:
+                init_x = 0.0
+                init_y = 0.0
+                init_yaw = 0.0
+    except Exception:
+        pass
+
     map_actions = []
-    if map_mode == 'static':
+    if map_mode == 'amcl':
         map_server_node = Node(
             package='nav2_map_server', executable='map_server', name='map_server', output='screen',
-            parameters=[{'yaml_filename': map_yaml, 'use_sim_time': True, 'topic_name': 'map', 'frame_id': 'map'}],
+            parameters=[{'yaml_filename': map_yaml, 'use_sim_time': use_sim_time, 'topic_name': 'map', 'frame_id': 'map'}],
+        )
+        amcl_node = Node(
+            package='nav2_amcl', executable='amcl', name='amcl', output='screen',
+            parameters=[
+                amcl_params,
+                {
+                    'use_sim_time': use_sim_time,
+                    'initial_pose.x': init_x,
+                    'initial_pose.y': init_y,
+                    'initial_pose.z': 0.0,
+                    'initial_pose.yaw': init_yaw,
+                }
+            ],
         )
         lifecycle_manager_node = Node(
-            package='nav2_lifecycle_manager', executable='lifecycle_manager', name='lifecycle_manager_map',
-            output='screen', parameters=[{'use_sim_time': True, 'autostart': True, 'node_names': ['map_server']}],
-        )
-        map_server_configure = TimerAction(period=10.0, actions=[
-            ExecuteProcess(cmd=['ros2', 'lifecycle', 'set', 'map_server', 'configure'], output='screen'),
-        ])
-        map_server_activate = TimerAction(period=12.0, actions=[
-            ExecuteProcess(cmd=['ros2', 'lifecycle', 'set', 'map_server', 'activate'], output='screen'),
-        ])
-        static_map_to_odom = Node(
-            package='tf2_ros', executable='static_transform_publisher', output='screen',
-            arguments=[spawn_x, spawn_y, '0', '0', '0', spawn_yaw, 'map', 'odom'],
+            package='nav2_lifecycle_manager', executable='lifecycle_manager', name='lifecycle_manager_localization',
+            output='screen', parameters=[{'use_sim_time': use_sim_time, 'autostart': True, 'node_names': ['map_server', 'amcl']}],
         )
         map_actions.extend([
-            static_map_to_odom,
             TimerAction(period=5.0, actions=[map_server_node]),
+            TimerAction(period=6.0, actions=[amcl_node]),
             TimerAction(period=7.0, actions=[lifecycle_manager_node]),
-            map_server_configure,
-            map_server_activate,
         ])
-    else:
+    elif map_mode == 'slam':
         slam_node = Node(
             package='slam_toolbox', executable='async_slam_toolbox_node',
             name='slam_toolbox', output='screen',
-            parameters=[slam_params, {'use_sim_time': True}]
+            parameters=[slam_params, {'use_sim_time': use_sim_time}]
         )
         slam_configure = TimerAction(period=10.0, actions=[
             ExecuteProcess(cmd=['ros2', 'lifecycle', 'set', 'slam_toolbox', 'configure'], output='screen'),
@@ -261,6 +300,24 @@ def launch_setup(context, *args, **kwargs):
             TimerAction(period=6.0, actions=[slam_node]),
             slam_configure,
             slam_activate,
+        ])
+    else:  # 'static' — open-loop static transform publisher (fallback legacy)
+        map_server_node = Node(
+            package='nav2_map_server', executable='map_server', name='map_server', output='screen',
+            parameters=[{'yaml_filename': map_yaml, 'use_sim_time': use_sim_time, 'topic_name': 'map', 'frame_id': 'map'}],
+        )
+        lifecycle_manager_node = Node(
+            package='nav2_lifecycle_manager', executable='lifecycle_manager', name='lifecycle_manager_map',
+            output='screen', parameters=[{'use_sim_time': use_sim_time, 'autostart': True, 'node_names': ['map_server']}],
+        )
+        static_map_to_odom = Node(
+            package='tf2_ros', executable='static_transform_publisher', output='screen',
+            arguments=[spawn_x, spawn_y, '0', '0', '0', spawn_yaw, 'map', 'odom'],
+        )
+        map_actions.extend([
+            static_map_to_odom,
+            TimerAction(period=5.0, actions=[map_server_node]),
+            TimerAction(period=7.0, actions=[lifecycle_manager_node]),
         ])
 
     mode_selector = Node(
@@ -280,6 +337,7 @@ def launch_setup(context, *args, **kwargs):
                  'spawn_x': float(spawn_x),
                  'spawn_y': float(spawn_y),
                  'spawn_yaw': float(spawn_yaw),
+                 'use_ground_truth': False,
                  'gazebo_odom_topic': '/model/polebot_amr/odometry',
              }]),
         Node(package='polebot_control', executable='odom_to_tf', name='odom_to_tf',
@@ -298,7 +356,7 @@ def launch_setup(context, *args, **kwargs):
             Node(package='polebot_control', executable='sliding_mode_controller', name='sliding_mode_controller',
                  output='screen', parameters=[{'use_sim_time': True, 'default_mode': mode_int}]),
         ])
-    else:
+    elif controller_type == 'pid':
         controller_nodes.extend([
             *odom_nodes,
             Node(package="polebot_control", executable="odom_to_posearray_node", output="screen",
@@ -318,15 +376,34 @@ def launch_setup(context, *args, **kwargs):
                      {"print_debug": False},
                  ]),
         ])
+    elif controller_type == 'teleop':
+        controller_nodes.extend([
+            *odom_nodes,
+        ])
     controller_action = TimerAction(period=17.0, actions=controller_nodes)
+
+    planning_actions = [planning_nodes] if controller_type != 'teleop' else []
+
+    teleop_actions = []
+    if teleop_opt:
+        teleop_node = Node(
+            package='teleop_twist_keyboard',
+            executable='teleop_twist_keyboard',
+            name='teleop_twist_keyboard',
+            output='screen',
+            prefix='xterm -e',
+            parameters=[{'use_sim_time': use_sim_time}],
+        )
+        teleop_actions.append(TimerAction(period=8.0, actions=[teleop_node]))
 
     return [
         rsp_node, gz_sim_node, bridge_node,
         TimerAction(period=3.0, actions=[spawn_node]),
         TimerAction(period=5.0, actions=[rviz2_node]),
         *map_actions,
-        planning_nodes,
+        *planning_actions,
         controller_action,
+        *teleop_actions,
     ]
 
 
@@ -334,9 +411,11 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('use_gazebo', default_value='true', description='true: jalankan Gazebo; false: simulator kinematis mandiri di RViz'),
         DeclareLaunchArgument('auto_follow', default_value='false', description='true: simulator kinematis melacak jalur secara mandiri (direct pure pursuit); false: gunakan controller'),
-        DeclareLaunchArgument('controller', default_value='smc', description='Pilihan kendali: smc | pid'),
+        DeclareLaunchArgument('controller', default_value='smc', description='Pilihan kendali: smc | pid | teleop'),
+        DeclareLaunchArgument('teleop', default_value='false', description='true: otomatis buka jendela xterm keyboard teleop; false: manual lewat terminal lain'),
         DeclareLaunchArgument('robot_config', default_value='trolley_pivot', description='solo | trolley_fixed | trolley_pivot'),
         DeclareLaunchArgument('world', default_value='factory', description='Pilihan dunia: factory (pabrik/gudang industri luas) | my_world'),
-        DeclareLaunchArgument('map_mode', default_value='static', description='Pilihan peta: static (factory_map.yaml / test_map.yaml) | slam (slam_toolbox)'),
+        DeclareLaunchArgument('map_mode', default_value='amcl', description='Pilihan peta/lokalisasi: amcl (closed-loop AMCL + factory_map) | slam (slam_toolbox) | static (open-loop static TF)'),
+        DeclareLaunchArgument('map', default_value='', description='Path atau nama file yaml peta kustom (opsional)'),
         OpaqueFunction(function=launch_setup),
     ])

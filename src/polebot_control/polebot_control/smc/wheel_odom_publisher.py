@@ -36,6 +36,9 @@ class WheelOdomPublisher(Node):
         self.declare_parameter('spawn_yaw', 0.0)
         self.declare_parameter('gazebo_odom_topic', '/model/polebot_amr/odometry')
 
+        self.declare_parameter('use_ground_truth', False)
+        self._use_ground_truth = bool(self.get_parameter('use_ground_truth').value)
+
         self._spawn_x = float(self.get_parameter('spawn_x').value)
         self._spawn_y = float(self.get_parameter('spawn_y').value)
         self._spawn_yaw = float(self.get_parameter('spawn_yaw').value)
@@ -60,17 +63,16 @@ class WheelOdomPublisher(Node):
         self._last_stamp: rclpy.time.Time | None = None
 
         self.get_logger().info(
-            f'WheelOdomPublisher started (spawn=[{self._spawn_x:.2f}, {self._spawn_y:.2f}, {self._spawn_yaw:.2f}], '
+            f'WheelOdomPublisher started (use_ground_truth={self._use_ground_truth}, '
+            f'spawn=[{self._spawn_x:.2f}, {self._spawn_y:.2f}, {self._spawn_yaw:.2f}], '
             f'gt_topic={gz_topic})'
         )
 
     def _cb_gz_odom(self, msg: Odometry):
-        """Handle Gazebo Ground-Truth Odometry.
+        """Handle Gazebo Ground-Truth Odometry (hanya aktif jika use_ground_truth=True)."""
+        if not self._use_ground_truth:
+            return
 
-        Gazebo's OdometryPublisher reports pose in Gazebo world coordinates.
-        We transform this relative to (spawn_x, spawn_y, spawn_yaw) so that the
-        ROS /odom frame origin is (0, 0, 0) at the spawn location.
-        """
         self._use_gz_gt = True
         self._last_gz_stamp = self.get_clock().now()
 
@@ -108,9 +110,8 @@ class WheelOdomPublisher(Node):
         self._pub.publish(odom)
 
     def _cb_joints(self, msg: JointState):
-        """Fallback: compute wheel odometry from joint encoder velocities if GT is absent."""
-        # If Gazebo GT was received recently (within 0.5s), don't overwrite with encoder integration
-        if self._use_gz_gt and self._last_gz_stamp is not None:
+        """Hitung odometri roda dari kecepatan enkoder sendi roda (fisika diff-drive riil)."""
+        if self._use_ground_truth and self._use_gz_gt and self._last_gz_stamp is not None:
             now = self.get_clock().now()
             dt_since_gt = (now - self._last_gz_stamp).nanoseconds / 1e9
             if dt_since_gt < 0.5:
@@ -138,11 +139,11 @@ class WheelOdomPublisher(Node):
         omega_l = msg.velocity[il]
         omega_r = msg.velocity[ir]
 
-        # Kinematics — standard diff-drive (drivewhl_l = left, drivewhl_r = right)
+        # Kinematika — standard diff-drive (drivewhl_l = left, drivewhl_r = right)
         v     = WHEEL_RADIUS / 2.0 * (omega_l + omega_r)
         omega = WHEEL_RADIUS / WHEEL_BASE * (omega_r - omega_l)
 
-        # Integrate pose
+        # Integrasi posisi pada frame odom lokal
         self._x     += v * math.cos(self._theta) * dt
         self._y     += v * math.sin(self._theta) * dt
         self._theta += omega * dt
@@ -159,8 +160,16 @@ class WheelOdomPublisher(Node):
         odom.pose.pose.orientation.z = math.sin(self._theta / 2.0)
         odom.pose.pose.orientation.w = math.cos(self._theta / 2.0)
 
+        # Matriks kovariansi diagonal untuk fusi sensor AMCL / SLAM / EKF
+        odom.pose.covariance[0]  = 0.001
+        odom.pose.covariance[7]  = 0.001
+        odom.pose.covariance[14] = 0.001
+        odom.pose.covariance[35] = 0.001
+
         odom.twist.twist.linear.x  = v
         odom.twist.twist.angular.z = omega
+        odom.twist.covariance[0]   = 0.001
+        odom.twist.covariance[35]  = 0.001
 
         self._pub.publish(odom)
 

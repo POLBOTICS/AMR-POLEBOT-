@@ -74,13 +74,32 @@ class PitdtProfiledPurePursuitController(Node):
         self.declare_parameter("max_w", 0.60)
 
         # Motion profile parameters
-        self.declare_parameter("profile_v_max", 0.25)
+        self.declare_parameter("motion_profile_type", "s_curve")  # s_curve | trapezoidal
+        self.declare_parameter("max_jerk", 0.16)
+        self.declare_parameter("approach_distance", 0.20)
+        self.declare_parameter("approach_speed", 0.05)
+        self.declare_parameter("profile_v_max", 0.1727)
         self.declare_parameter("profile_a_max", 0.08)
         self.declare_parameter("profile_d_max", 0.10)
         self.declare_parameter("profile_min_v", 0.025)
         self.declare_parameter("profile_min_v_disable_distance", 0.20)
-        self.declare_parameter("max_lateral_accel", 0.12)
+        self.declare_parameter("max_lateral_accel", 0.25)
         self.declare_parameter("profile_alpha_max", 0.70)
+
+        # Gain scheduling parameters (GS-PID per phase)
+        self.declare_parameter("use_gain_scheduling", True)
+        self.declare_parameter("kp_accel", 2.8)
+        self.declare_parameter("ki_accel", 0.0)
+        self.declare_parameter("kd_accel", 0.08)
+        self.declare_parameter("kp_cruise", 3.2)
+        self.declare_parameter("ki_cruise", 0.0)
+        self.declare_parameter("kd_cruise", 0.10)
+        self.declare_parameter("kp_decel", 3.0)
+        self.declare_parameter("ki_decel", 0.0)
+        self.declare_parameter("kd_decel", 0.12)
+        self.declare_parameter("kp_approach", 1.6)
+        self.declare_parameter("ki_approach", 0.0)
+        self.declare_parameter("kd_approach", 0.05)
 
         # Linear correction parameters.
         # In this profiled controller, the linear part is used mostly as
@@ -93,7 +112,7 @@ class PitdtProfiledPurePursuitController(Node):
         self.declare_parameter("v_fb_max", 0.08)
         self.declare_parameter("i_lin_limit", 1.0)
 
-        # Angular correction parameters
+        # Angular correction fallback parameters (used when use_gain_scheduling=False)
         self.declare_parameter("kp_ang", 0.65)
         self.declare_parameter("ki_ang", 0.00)
         self.declare_parameter("kd_ang", 0.02)
@@ -152,6 +171,10 @@ class PitdtProfiledPurePursuitController(Node):
 
         self.last_v_cmd = 0.0
         self.last_w_cmd = 0.0
+        self.v_profile = 0.0
+        self.a_profile = 0.0
+        self.j_profile = 0.0
+        self.motion_phase = "stopped"
 
         self.i_lin = 0.0
         self.i_ang = 0.0
@@ -214,10 +237,139 @@ class PitdtProfiledPurePursuitController(Node):
         return float(self.get_parameter(name).value)
 
     def publish_zero(self) -> None:
-        msg = Twist()
-        self.cmd_pub.publish(msg)
         self.last_v_cmd = 0.0
         self.last_w_cmd = 0.0
+        self.v_profile = 0.0
+        self.a_profile = 0.0
+        self.j_profile = 0.0
+        self.motion_phase = "stopped"
+        msg = Twist()
+        self.cmd_pub.publish(msg)
+
+    def jerk_limited_speed_from_distance(self, distance: float) -> float:
+        """
+        Kecepatan maksimum yang masih dapat dihentikan menggunakan
+        batas deselerasi dan jerk (formula analitik peninggalan penelitian).
+        """
+        d = max(0.0, distance)
+        if d <= 0.0:
+            return 0.0
+        a = max(self.get_param_float("profile_d_max"), 1e-6)
+        j = max(self.get_param_float("max_jerk"), 1e-6)
+        d_switch = (a ** 3) / (j ** 2)
+        if d <= d_switch:
+            return (d * math.sqrt(j)) ** (2.0 / 3.0)
+        b = (a * a) / j
+        return 0.5 * (-b + math.sqrt(b * b + 8.0 * a * d))
+
+    def classify_motion_phase(
+        self,
+        remaining: float,
+        v_now: float,
+        a_profile: float,
+        target_v: float,
+    ) -> str:
+        approach_dist = self.get_param_float("approach_distance")
+        approach_spd = self.get_param_float("approach_speed")
+        max_v = min(self.get_param_float("max_v"), self.get_param_float("profile_v_max"))
+        a_max = self.get_param_float("profile_a_max")
+        d_max = self.get_param_float("profile_d_max")
+        accel_thresh = max(1e-3, 0.05 * max(a_max, d_max))
+
+        if remaining <= approach_dist and v_now <= approach_spd + 1e-4:
+            return "approach"
+        if a_profile < -accel_thresh or (target_v < 0.95 * v_now and remaining < 1.0):
+            return "decel"
+        if a_profile > accel_thresh or v_now < 0.90 * max_v:
+            return "accel"
+        return "cruise"
+
+    def select_angular_gains(self, phase: str) -> Tuple[float, float, float]:
+        """Pilih gain PID kemudi berdasarkan fase gerak (Gain Scheduling PID)."""
+        if not bool(self.get_parameter("use_gain_scheduling").value):
+            return (
+                self.get_param_float("kp_ang"),
+                self.get_param_float("ki_ang"),
+                self.get_param_float("kd_ang"),
+            )
+        if phase == "accel":
+            return (
+                self.get_param_float("kp_accel"),
+                self.get_param_float("ki_accel"),
+                self.get_param_float("kd_accel"),
+            )
+        elif phase == "cruise":
+            return (
+                self.get_param_float("kp_cruise"),
+                self.get_param_float("ki_cruise"),
+                self.get_param_float("kd_cruise"),
+            )
+        elif phase == "decel":
+            return (
+                self.get_param_float("kp_decel"),
+                self.get_param_float("ki_decel"),
+                self.get_param_float("kd_decel"),
+            )
+        else:  # approach atau lainnya
+            return (
+                self.get_param_float("kp_approach"),
+                self.get_param_float("ki_approach"),
+                self.get_param_float("kd_approach"),
+            )
+
+    def compute_s_curve_profile(
+        self,
+        dist_to_end: float,
+        curvature: float,
+        dt: float,
+    ) -> Tuple[float, str]:
+        """Menghitung profil kecepatan linear S-Curve dengan batasan jerk, percepatan, dan kurvatur."""
+        dt = max(dt, 1e-6)
+        max_v = self.get_param_float("max_v")
+        profile_v_max = self.get_param_float("profile_v_max")
+        profile_a_max = max(self.get_param_float("profile_a_max"), 1.0e-6)
+        profile_d_max = max(self.get_param_float("profile_d_max"), 1.0e-6)
+        max_jerk = max(self.get_param_float("max_jerk"), 1.0e-6)
+        profile_min_v = self.get_param_float("profile_min_v")
+        profile_min_v_disable_distance = self.get_param_float("profile_min_v_disable_distance")
+        max_lateral_accel = max(self.get_param_float("max_lateral_accel"), 1.0e-6)
+        stop_dist = self.get_param_float("stop_distance")
+
+        stopping_dist = max(0.0, dist_to_end - stop_dist)
+        v_jerk_stop = self.jerk_limited_speed_from_distance(stopping_dist)
+        target_v = min(max_v, profile_v_max, v_jerk_stop)
+
+        if abs(curvature) > 1.0e-6:
+            v_curve = math.sqrt(max_lateral_accel / abs(curvature))
+            target_v = min(target_v, v_curve)
+
+        if dist_to_end > profile_min_v_disable_distance:
+            target_v = max(target_v, profile_min_v)
+
+        old_v = self.v_profile
+        old_a = self.a_profile
+        delta_v = target_v - old_v
+
+        if abs(delta_v) <= 1e-7:
+            target_a = 0.0
+        elif delta_v > 0.0:
+            target_a = min(profile_a_max, math.sqrt(2.0 * max_jerk * abs(delta_v)))
+        else:
+            target_a = -min(profile_d_max, math.sqrt(2.0 * max_jerk * abs(delta_v)))
+
+        max_delta_a = max_jerk * dt
+        new_a = clamp(target_a, old_a - max_delta_a, old_a + max_delta_a)
+        new_a = clamp(new_a, -profile_d_max, profile_a_max)
+
+        new_v = old_v + 0.5 * (old_a + new_a) * dt
+        new_v = clamp(new_v, 0.0, max_v)
+
+        self.a_profile = new_a
+        self.j_profile = (new_a - old_a) / dt
+        self.v_profile = new_v
+        self.motion_phase = self.classify_motion_phase(dist_to_end, new_v, new_a, target_v)
+
+        return new_v, self.motion_phase
 
     def nearest_path_index(self, x: float, y: float) -> int:
         if not self.path_xy:
@@ -365,6 +517,7 @@ class PitdtProfiledPurePursuitController(Node):
         nearest_i = self.nearest_path_index(x, y)
         progress_s = self.path_s[nearest_i]
         remaining_s = max(0.0, self.path_length - progress_s)
+        dist_to_end = remaining_s if progress_s < 0.85 * self.path_length else max(remaining_s, goal_distance)
 
         # Only declare goal reached if robot has progressed to the end of the path
         # (prevents premature termination on paths starting near the goal, loops, or crossovers)
@@ -415,18 +568,32 @@ class PitdtProfiledPurePursuitController(Node):
         cte = -sin_yaw * dx_near + cos_yaw * dy_near
 
         # Feed-forward motion profile.
-        v_ff = self.compute_profile_velocity(
-            progress_s=progress_s,
-            remaining_s=remaining_s,
-            goal_distance=goal_distance,
-            curvature=curvature,
-        )
+        motion_profile_type = str(self.get_parameter("motion_profile_type").value).lower()
+        if "s_curve" in motion_profile_type or "scurve" in motion_profile_type:
+            v_ff, phase = self.compute_s_curve_profile(
+                dist_to_end=dist_to_end,
+                curvature=curvature,
+                dt=dt,
+            )
+        else:
+            v_ff = self.compute_profile_velocity(
+                progress_s=progress_s,
+                remaining_s=remaining_s,
+                goal_distance=goal_distance,
+                curvature=curvature,
+            )
+            phase = self.classify_motion_phase(
+                remaining=dist_to_end,
+                v_now=v_ff,
+                a_profile=self.a_profile,
+                target_v=v_ff,
+            )
+            self.motion_phase = phase
+
         w_ff = v_ff * curvature
 
-        # Angular PI(t)D(t)-like feedback.
-        kp_ang = self.get_param_float("kp_ang")
-        ki_ang = self.get_param_float("ki_ang")
-        kd_ang = self.get_param_float("kd_ang")
+        # Angular Gain-Scheduled PI(t)D(t)-like feedback.
+        kp_ang, ki_ang, kd_ang = self.select_angular_gains(phase)
         u0_ang = self.get_param_float("u0_ang")
         w_fb_max = self.get_param_float("w_fb_max")
         i_ang_limit = self.get_param_float("i_ang_limit")
@@ -490,7 +657,6 @@ class PitdtProfiledPurePursuitController(Node):
             if abs(heading_error) > math.radians(40.0):
                 v_target = 0.0
             else:
-                dist_to_end = remaining_s if progress_s < 0.85 * self.path_length else max(remaining_s, goal_distance)
                 if dist_to_end > 0.30:
                     v_target = max(v_target, reacquire_min_v)
             w_target = clamp(w_target, -reacquire_w_limit, reacquire_w_limit)
@@ -500,14 +666,22 @@ class PitdtProfiledPurePursuitController(Node):
         profile_d_max = self.get_param_float("profile_d_max")
         profile_alpha_max = self.get_param_float("profile_alpha_max")
 
-        if v_target >= self.last_v_cmd:
-            v_cmd = self.rate_limit(v_target, self.last_v_cmd, profile_a_max, dt)
+        if "s_curve" in motion_profile_type or "scurve" in motion_profile_type:
+            # Pada S-Curve, v_ff sudah membatasi jerk dan percepatan.
+            # Jika v_target berkurang karena penalti CTE atau reacquire, v_cmd menyesuaikan.
+            if v_target < v_ff:
+                v_cmd = clamp(v_target, 0.0, self.get_param_float("max_v"))
+                self.v_profile = v_cmd
+            else:
+                v_cmd = clamp(v_ff, 0.0, self.get_param_float("max_v"))
         else:
-            v_cmd = self.rate_limit(v_target, self.last_v_cmd, profile_d_max, dt)
+            if v_target >= self.last_v_cmd:
+                v_cmd = self.rate_limit(v_target, self.last_v_cmd, profile_a_max, dt)
+            else:
+                v_cmd = self.rate_limit(v_target, self.last_v_cmd, profile_d_max, dt)
+            v_cmd = clamp(v_cmd, 0.0, self.get_param_float("max_v"))
 
         w_cmd = self.rate_limit(w_target, self.last_w_cmd, profile_alpha_max, dt)
-
-        v_cmd = clamp(v_cmd, 0.0, self.get_param_float("max_v"))
         w_cmd = clamp(w_cmd, -max_w, max_w)
 
         self.last_v_cmd = v_cmd
@@ -524,12 +698,13 @@ class PitdtProfiledPurePursuitController(Node):
 
         if bool(self.get_parameter("print_debug").value):
             self.get_logger().info(
-                "profiled_ctrl "
+                f"profiled_ctrl [{phase}] "
                 f"idx={nearest_i}/{len(self.path_xy)-1} "
                 f"progress={progress_s:.3f} remain={remaining_s:.3f} "
                 f"goal={goal_distance:.3f} cte={cte:.3f} "
                 f"v_ff={v_ff:.3f} w_ff={w_ff:.3f} "
-                f"v={v_cmd:.3f} w={w_cmd:.3f}"
+                f"v={v_cmd:.3f} w={w_cmd:.3f} "
+                f"kp={kp_ang:.2f} kd={kd_ang:.3f}"
             )
 
 

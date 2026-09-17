@@ -100,8 +100,8 @@ GOAL_TOLERANCE  = 0.15    # m — kompromi: lebih akurat tapi berhenti sebelum
                           # zona singular atan2(phi) yg dominan di bawah ~0.10m
 RHO_MIN         = 0.05    # m — minimum rho before phi_dot blows up
 COS_PHI_MIN     = 0.707   # cos(45°) — below this: switch to alignment mode to avoid driving sideways into obstacles
-OBS_STOP_DIST   = 0.30    # m
-OBS_SLOW_DIST   = 0.50    # m
+OBS_STOP_DIST   = 0.35    # m — ambang batas darurat stop sebelum menubruk dinding
+OBS_SLOW_DIST   = 0.70    # m — mulai melambat bertahap saat mendekati dinding
 JACKKNIFE_LIMIT = math.radians(55)  # 55 deg (physical joint limit in SDF is 90 deg / 1.57 rad)
 JACKKNIFE_WARN  = math.radians(40)  # 40 deg — soft limit threshold
 CONTROL_FREQ    = 50.0    # Hz
@@ -138,6 +138,7 @@ class SlidingModeControllerNode(Node):
             Float64MultiArray, '/joint_group_effort_controller/commands', 10)
         self._pub_cmdvel  = self.create_publisher(Twist, '/cmd_vel', 10)
         self._pub_debug   = self.create_publisher(String, '/smc_debug', 10)
+        self._pub_collision_warn = self.create_publisher(String, '/collision_warning', 10)
         self._pub_actual  = self.create_publisher(Path, '/actual_path', 10)
 
         # TF: get robot pose in map frame (path is in map frame)
@@ -145,7 +146,7 @@ class SlidingModeControllerNode(Node):
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
 
         self.declare_parameter('default_mode', 2)  # 0=Solo, 1=Fixed, 2=Pivot
-        self.declare_parameter('enable_obstacle_stop', False)  # Default: False (agar tracking simulasi di RViz terus berjalan lancar)
+        self.declare_parameter('enable_obstacle_stop', True)  # Default: True (pengaman tabrakan aktif)
 
         self._path: list[tuple[float, float]] = []
         self._path_idx: int = 0
@@ -153,6 +154,7 @@ class SlidingModeControllerNode(Node):
         self._actual_path = Path()
         self._actual_path.header.frame_id = 'map'
         self._last_actual_pub_time = 0.0
+        self._last_warn_time = 0.0
         self._rx = self._ry = self._rtheta = 0.0
         self._v  = self._omega = 0.0         # actual velocities from joint states or odom
         self._mode: int = self.get_parameter('default_mode').value
@@ -236,18 +238,18 @@ class SlidingModeControllerNode(Node):
         except Exception:
             return self._have_pose   # use last good pose if TF temporarily unavailable
 
-    def _obstacle_factor(self) -> tuple[float, bool]:
+    def _obstacle_factor(self) -> tuple[float, bool, float]:
         if not self._scan_ranges:
-            return 1.0, False
+            return 1.0, False, float('inf')
         valid = [r for r in self._scan_ranges if math.isfinite(r) and r > 0.0]
         if not valid:
-            return 1.0, False
+            return 1.0, False, float('inf')
         d_min = min(valid)
         if d_min < OBS_STOP_DIST:
-            return 0.0, True
+            return 0.0, True, d_min
         if d_min < OBS_SLOW_DIST:
-            return (d_min - OBS_STOP_DIST) / (OBS_SLOW_DIST - OBS_STOP_DIST), False
-        return 1.0, False
+            return (d_min - OBS_STOP_DIST) / (OBS_SLOW_DIST - OBS_STOP_DIST), False, d_min
+        return 1.0, False, d_min
 
     def _find_lookahead(self) -> tuple[tuple[float, float] | None, int]:
         n = len(self._path)
@@ -409,11 +411,21 @@ class SlidingModeControllerNode(Node):
         v_dot_d     = max(-2.0, min(2.0, v_dot_d))
         omega_dot_d = max(-4.0, min(4.0, omega_dot_d))
 
-        # Obstacle avoidance (dinonaktifkan secara default agar simulasi di RViz terus berjalan mengikuti path)
+        # Obstacle avoidance & collision guard aktif
         if self.get_parameter('enable_obstacle_stop').value:
-            obs_factor, emergency = self._obstacle_factor()
+            obs_factor, emergency, d_min = self._obstacle_factor()
             if emergency:
                 self._effort_zero()
+                if now_sec - self._last_warn_time > 1.0:
+                    self._last_warn_time = now_sec
+                    warn_str = (
+                        f'[COLLISION GUARD] Bahaya! Dinding terdeteksi sangat dekat ({d_min:.2f}m < {OBS_STOP_DIST:.2f}m). '
+                        f'Robot berhenti darurat!'
+                    )
+                    self.get_logger().warn(warn_str)
+                    msg_w = String()
+                    msg_w.data = warn_str
+                    self._pub_collision_warn.publish(msg_w)
                 return
             if obs_factor < 1.0:
                 v_target = p['v_max'] * obs_factor

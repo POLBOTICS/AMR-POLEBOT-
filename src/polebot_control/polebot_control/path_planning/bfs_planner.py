@@ -14,14 +14,14 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from nav_msgs.msg import OccupancyGrid, Path
 from geometry_msgs.msg import PoseStamped, Point
-from std_msgs.msg import Int32
+from std_msgs.msg import Int32, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 # Inflation radii per towing mode:
-# Solo: 0.52m (lebar AMR 0.67m -> batas clearance fisik >18cm saat nyerong & belok, lorong potong 1.5m tetap tembus)
-# Fixed: 0.82m (kendaraan kaku panjang 2.766m, lebar 1.00m, lewat jalan lingkar utama, clearance aman untuk swept envelope)
-# Pivot: 0.80m (kendaraan gandeng artikulasi panjang 2.766m, lewat jalan lingkar utama, hindari lorong sempit <1.6m)
-INFLATE_RADIUS = {0: 0.52, 1: 0.82, 2: 0.80}  # metre
+# Solo: 0.58m (lebar AMR 0.67m -> batas clearance fisik aman saat nyerong & belok, tidak menyerempet dinding)
+# Fixed: 0.92m (kendaraan kaku panjang 2.766m, lebar 1.00m, clearance ekstra aman untuk swept envelope)
+# Pivot: 0.90m (kendaraan gandeng artikulasi panjang 2.766m, clearance ekstra aman agar trailer tidak menyerempet rak)
+INFLATE_RADIUS = {0: 0.58, 1: 0.92, 2: 0.90}  # metre
 
 # Kinematic minimum turning radius (R_min) untuk busur non-holonomik:
 # Solo: 0.25m (belokan rapat, lincah, dan tidak melebar ke dinding seberang)
@@ -66,6 +66,7 @@ class BFSPlannerNode(Node):
         self._pub_path     = self.create_publisher(Path, '/planned_path', latched)
         self._pub_ref_path = self.create_publisher(Path, '/reference_path', latched)
         self._pub_markers  = self.create_publisher(MarkerArray, '/bfs_markers', 10)
+        self._pub_warning  = self.create_publisher(String, '/planner_warning', 10)
 
         # TF buffer created once here — never inside a callback (CLAUDE.md rule)
         self._tf_buffer   = tf2_ros.Buffer()
@@ -703,7 +704,75 @@ class BFSPlannerNode(Node):
                 safe_init = self._is_trailer_safe(init_curve, self._mode, occupied, origin, resolution)
 
         if not safe_init:
-            init_curve = [(x0, y0)]
+            if dot < -0.25:
+                # ── SMART TURNAROUND FOR TIGHT CORRIDORS ──
+                # Di ruang sempit, trailer tidak boleh memaksakan putar balik di tempat (akan menabrak dinding).
+                # Lakukan Forward Search: telusuri koridor lurus ke depan untuk mencari persimpangan/ruang lapang.
+                best_fwd_curve = None
+                for fwd_d in [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]:
+                    fx = x0 + fwd_d * t0[0]
+                    fy = y0 + fwd_d * t0[1]
+                    # Pastikan garis lurus maju ke (fx, fy) aman dari rintangan
+                    if not self._line_free((x0, y0), (fx, fy), occupied, origin, resolution):
+                        break  # Terhalang dinding di depan, hentikan pencarian
+
+                    # Cek clearance di titik maju (fx, fy)
+                    dfl, dfr = self._check_side_clearance(fx, fy, theta0, occupied, origin, resolution)
+                    fwd_sign = 1.0 if dfl >= dfr else -1.0
+                    fwd_lat = min(max(dfl if fwd_sign > 0 else dfr, 0.2) * 0.4, r_min * 0.5)
+                    fb1_lat_x = -fwd_sign * math.sin(theta0) * fwd_lat
+                    fb1_lat_y =  fwd_sign * math.cos(theta0) * fwd_lat
+
+                    fb0 = (fx, fy)
+                    fb1 = (fx + ctrl_dist * t0[0] + fb1_lat_x, fy + ctrl_dist * t0[1] + fb1_lat_y)
+                    fb3 = first_target
+                    fb2 = (first_target[0] - ctrl_dist * seg1_dir[0], first_target[1] - ctrl_dist * seg1_dir[1])
+
+                    cand_turn = []
+                    for k in range(num_init):
+                        t = k / float(num_init - 1)
+                        bx = ((1.0 - t)**3 * fb0[0] + 3.0 * (1.0 - t)**2 * t * fb1[0] +
+                              3.0 * (1.0 - t) * t**2 * fb2[0] + t**3 * fb3[0])
+                        by = ((1.0 - t)**3 * fb0[1] + 3.0 * (1.0 - t)**2 * t * fb1[1] +
+                              3.0 * (1.0 - t) * t**2 * fb2[1] + t**3 * fb3[1])
+                        cand_turn.append((bx, by))
+
+                    # Diskritkan segmen maju lurus
+                    fwd_steps = max(2, int(fwd_d / PATH_STEP))
+                    straight_fwd = [(x0 + (s / fwd_steps) * (fx - x0), y0 + (s / fwd_steps) * (fy - y0))
+                                    for s in range(fwd_steps)]
+                    cand_full = straight_fwd + cand_turn
+
+                    cand_safe = all(self._line_free(cand_full[k], cand_full[k + 1], occupied, origin, resolution)
+                                    for k in range(len(cand_full) - 1))
+                    if cand_safe:
+                        if self._mode == 0:
+                            cand_safe = self._is_solo_safe(cand_full, occupied, origin, resolution)
+                        else:
+                            cand_safe = self._is_trailer_safe(cand_full, self._mode, occupied, origin, resolution)
+
+                    if cand_safe:
+                        best_fwd_curve = cand_full
+                        self.get_logger().info(
+                            f'Smart Turnaround: Menemukan ruang putar aman {fwd_d:.1f}m di depan! Robot akan maju sebelum memutar.'
+                        )
+                        break
+
+                if best_fwd_curve is not None:
+                    init_curve = best_fwd_curve
+                else:
+                    # Tidak ada ruang lapang di depan (koridor buntu sempit)
+                    warn_msg = (
+                        f'[PLANNER ALERT] Ruang tidak cukup untuk manuver putar balik trolley! '
+                        f'Clearance samping ({max(dl, dr):.2f}m) < batas aman. Jalur dibatalkan demi keamanan bodi trolley.'
+                    )
+                    self.get_logger().error(warn_msg)
+                    msg_w = String()
+                    msg_w.data = warn_msg
+                    self._pub_warning.publish(msg_w)
+                    return []
+            else:
+                init_curve = [(x0, y0)]
 
         # 3. Rakit lintasan terurut tanpa duplikasi titik dan tanpa lompatan terbalik
         path_pts = list(init_curve)
@@ -799,6 +868,16 @@ class BFSPlannerNode(Node):
         pruned_pts = self._prune_collinear(pulled_pts, inflated, origin, resolution)
         # 3. Non-Holonomic Path Synthesis: tangen awal robot_pose[2] + fillet sudut R_min
         nh_pts     = self._build_nonholonomic_path(robot_pose, pruned_pts, r_min, inflated, occupied, origin, resolution)
+        if len(nh_pts) < 2:
+            self.get_logger().error(
+                f'[PLANNER ALERT] Tidak dapat menghasilkan jalur aman untuk {inflate_label}. Manuver terhalang dinding!'
+            )
+            empty_path = Path()
+            empty_path.header.stamp = self.get_clock().now().to_msg()
+            empty_path.header.frame_id = 'map'
+            self._pub_path.publish(empty_path)
+            self._pub_ref_path.publish(empty_path)
+            return
         # 4. Interpolasi jarak konstan (equidistant)
         interp_pts = self._interpolate_equidistant(nh_pts, PATH_STEP)
         smooth_pts = self._smooth(interp_pts, 3)
