@@ -13,7 +13,13 @@ import mimetypes
 processes = {
     'motor': None,
     'slam': None,
-    'nav': None
+    'nav': None,
+    'research': None
+}
+
+active_motion_mode = {
+    'controller': 'native',
+    'planner': 'native'
 }
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -62,9 +68,82 @@ class RequestHandler(BaseHTTPRequestHandler):
             map_files = []
             if os.path.exists(maps_dir):
                 for f in os.listdir(maps_dir):
-                    if f.endswith('.yaml'):
+                    if f.endswith('.yaml') and not f.endswith('_mask.yaml'):
                         map_files.append(f)
             self.wfile.write(json.dumps({'maps': sorted(map_files)}).encode('utf-8'))
+            return
+
+        if parsed_path == '/api/zones':
+            self._set_headers()
+            maps_dir = os.path.join(os.path.expanduser('~'), 'Desktop', 'AMR-POLEBOT-WS', 'maps')
+            zones_file = os.path.join(maps_dir, 'zones.json')
+            zones = []
+            if os.path.exists(zones_file):
+                try:
+                    with open(zones_file, 'r') as f:
+                        zones = json.load(f)
+                except Exception:
+                    zones = []
+            self.wfile.write(json.dumps({'zones': zones}).encode('utf-8'))
+            return
+
+        if parsed_path == '/api/motion_modes':
+            self._set_headers()
+            data = {
+                'active': active_motion_mode,
+                'status': {
+                    'research_running': processes['research'] is not None and processes['research'].poll() is None
+                },
+                'options': {
+                    'controllers': [
+                        {
+                            'id': 'native',
+                            'name': 'Native DWB (Standard OK)',
+                            'badge': 'Standard OK',
+                            'description': 'Standard Nav2 DWB Local Planner with stop & backup recovery',
+                            'params': {'controller': 'DWBLocalPlanner', 'max_vel_x': '0.18 m/s', 'acc_lim_x': '0.4 m/s²', 'xy_goal_tol': '0.15 m'}
+                        },
+                        {
+                            'id': 'pid',
+                            'name': 'PID Profiled (S-Curve)',
+                            'badge': 'S-Curve Gain Scheduling',
+                            'description': 'PI(t)D(t)-Pure Pursuit with S-curve jerk-limited motion profiling',
+                            'params': {'profile': 's_curve', 'v_max': '0.18 m/s', 'max_jerk': '0.16 m/s³', 'kp_cruise': '3.2', 'kp_lin': '0.35'}
+                        },
+                        {
+                            'id': 'smc',
+                            'name': 'SMC (Sliding Mode)',
+                            'badge': 'Alipour Dynamic Inversion',
+                            'description': 'Sliding Mode Controller on polar errors (rho, phi) with obstacle guard',
+                            'params': {'formulation': 'Alipour et al. 2019', 'lambda1': '0.5', 'lambda2': '1.5', 'K1': '2.0', 'K2': '10.0'}
+                        }
+                    ],
+                    'planners': [
+                        {
+                            'id': 'native',
+                            'name': 'Native Nav2 (Costmap A*)',
+                            'badge': 'Standard OK',
+                            'description': 'Global costmap-based Navfn planner with keepout & speed filters',
+                            'params': {'type': 'nav2_navfn_planner', 'use_astar': 'true', 'costmap': 'global_costmap'}
+                        },
+                        {
+                            'id': 'bfs',
+                            'name': 'BFS (Breadth-First Search)',
+                            'badge': 'Uniform Wavefront',
+                            'description': '8-connected BFS grid planner with string pulling & non-holonomic fillet curves',
+                            'params': {'type': 'BFS 8-connected', 'step': '0.08 m', 'fillet_r_min': '0.25 m'}
+                        },
+                        {
+                            'id': 'astar',
+                            'name': 'A* Euclidean Optimal',
+                            'badge': 'Optimal Clearance',
+                            'description': 'A* shortest path search with distance-transform obstacle clearance penalty',
+                            'params': {'type': 'A* Heuristic', 'clearance_weight': '0.08', 'step': '0.08 m'}
+                        }
+                    ]
+                }
+            }
+            self.wfile.write(json.dumps(data).encode('utf-8'))
             return
 
         # Serve static files
@@ -185,6 +264,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                     else:
                         maps_dir = os.path.join(os.path.expanduser('~'), 'Desktop', 'AMR-POLEBOT-WS', 'maps')
                         os.makedirs(maps_dir, exist_ok=True)
+                        zones_list = data.get('zones', None)
+                        if zones_list is not None:
+                            try:
+                                with open(os.path.join(maps_dir, 'zones.json'), 'w') as f:
+                                    json.dump(zones_list, f, indent=2)
+                            except Exception:
+                                pass
                         keepout_pgm = os.path.join(maps_dir, "keepout_mask.pgm")
                         keepout_yaml = os.path.join(maps_dir, "keepout_mask.yaml")
                         speed_pgm = os.path.join(maps_dir, "speed_mask.pgm")
@@ -314,6 +400,50 @@ class RequestHandler(BaseHTTPRequestHandler):
                             f.write(yaml_content)
 
                         response['message'] = f'Edited map saved successfully as {map_name}.yaml'
+                except Exception as e:
+                    response = {'status': 'error', 'message': str(e)}
+            else:
+                response = {'status': 'error', 'message': 'Empty body'}
+
+        elif parsed_path == '/api/set_motion_mode':
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 0:
+                body = self.rfile.read(content_length).decode('utf-8')
+                try:
+                    data = json.loads(body)
+                    controller = data.get('controller', active_motion_mode['controller']).lower()
+                    planner = data.get('planner', active_motion_mode['planner']).lower()
+
+                    # Stop existing research process if running
+                    if processes.get('research') is not None and processes['research'].poll() is None:
+                        try:
+                            os.killpg(os.getpgid(processes['research'].pid), signal.SIGINT)
+                            processes['research'].wait(timeout=2.0)
+                        except Exception:
+                            try:
+                                os.killpg(os.getpgid(processes['research'].pid), signal.SIGKILL)
+                            except Exception:
+                                pass
+                        processes['research'] = None
+
+                    active_motion_mode['controller'] = controller
+                    active_motion_mode['planner'] = planner
+
+                    # If not native, launch research_control.launch.py with chosen args
+                    if controller != 'native' or planner != 'native':
+                        c_arg = controller if controller in ('pid', 'smc') else 'none'
+                        p_arg = planner if planner in ('bfs', 'astar') else 'none'
+                        cmd = [
+                            'ros2', 'launch', 'polebot_research_control', 'research_control.launch.py',
+                            f'controller:={c_arg}', f'planner:={p_arg}'
+                        ]
+                        processes['research'] = subprocess.Popen(cmd, preexec_fn=os.setsid)
+
+                    response = {
+                        'status': 'success',
+                        'active': active_motion_mode,
+                        'message': f"Switched to Controller: {controller.upper()}, Planner: {planner.upper()}"
+                    }
                 except Exception as e:
                     response = {'status': 'error', 'message': str(e)}
             else:

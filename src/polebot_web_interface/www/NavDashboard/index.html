@@ -26,9 +26,9 @@
     </div>
     <div class="teleop-body">
         <div class="teleop-speed-controls" id="teleop-speed-controls">
-            <button class="speed-btn active" id="btn-speed-slow" onclick="setTeleopSpeed(0.5, 1.0, 'btn-speed-slow')">🐢 Slow</button>
-            <button class="speed-btn" id="btn-speed-norm" onclick="setTeleopSpeed(1.0, 2.0, 'btn-speed-norm')">🚶 Normal</button>
-            <button class="speed-btn" id="btn-speed-fast" onclick="setTeleopSpeed(1.5, 3.0, 'btn-speed-fast')">🐇 Fast</button>
+            <button class="speed-btn active" id="btn-speed-slow" onclick="setTeleopSpeed(0.10, 0.2, 'btn-speed-slow')">🐢 Slow (0.10m/s)</button>
+            <button class="speed-btn" id="btn-speed-norm" onclick="setTeleopSpeed(0.15, 0.3, 'btn-speed-norm')">🚶 Normal (0.15m/s)</button>
+            <button class="speed-btn" id="btn-speed-fast" onclick="setTeleopSpeed(0.18, 0.4, 'btn-speed-fast')">🐇 Fast (0.18m/s)</button>
         </div>
         <div class="joystick-container">
             <canvas id="joystick-canvas" width="160" height="160"></canvas>
@@ -69,6 +69,7 @@
             <label class="layer-row"><input id="layer-robot" type="checkbox" checked onchange="setLayer('robot', this.checked)"><span>Robot model<code>/robot_pose_web</code></span><i class="layer-swatch robot-swatch"></i></label>
             <label class="layer-row"><input id="layer-scan" type="checkbox" checked onchange="setLayer('scan', this.checked)"><span>Laser scan<code>/scan</code></span><i class="layer-swatch scan-swatch"></i></label>
             <label class="layer-row"><input id="layer-path" type="checkbox" checked onchange="setLayer('path', this.checked)"><span>Global path<code>/plan</code></span><i class="layer-swatch path-swatch"></i></label>
+            <label class="layer-row"><input id="layer-zones" type="checkbox" checked onchange="toggleZoneOverlayVisibility(this.checked)"><span>Safety zones<code>Keepout & Speed</code></span><i class="layer-swatch" style="background:#ef4444; border: 1px solid #f59e0b;"></i></label>
             <label class="layer-row"><input id="layer-grid" type="checkbox" checked onchange="setLayer('grid', this.checked)"><span>Grid<code>1 m spacing</code></span></label>
         </div>
         <div class="display-section" id="section-costmaps"><h2>Costmaps</h2>
@@ -83,35 +84,155 @@
             <div id="costmap-detail-value" class="panel-note">All costs · RViz</div>
             <p class="panel-note">Raise this to show a narrower inflation band. Display only; Nav2 keeps the full safety margin.</p>
         </div>
-        <div class="display-section" id="section-zone-editor">
-            <h2>🛡️ Zone Editor (Filters)</h2>
-            <div style="display: flex; gap: 4px; margin-bottom: 6px;">
-                <button class="tool-btn active" id="btn-zone-keepout" onclick="setZoneType('keepout')" title="Draw Restricted Area">🚫 Restricted</button>
-                <button class="tool-btn" id="btn-zone-speed" onclick="setZoneType('speed')" title="Draw Speed Limit Area">⚠️ Speed Limit</button>
-                <button class="tool-btn" id="btn-zone-free" onclick="setZoneType('free')" title="Clear Zone">⬜ Clear</button>
+        <div class="display-section" id="section-motion-architecture">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <h2 style="margin:0;">🧠 Motion & Planning</h2>
+                <span id="motion-mode-badge" class="mode-status-badge badge-native">Native OK</span>
             </div>
-            <div style="display: flex; gap: 4px; margin-bottom: 6px;">
-                <button class="tool-btn active" id="btn-zone-shape-pencil" onclick="setZoneShape('pencil')" title="Freehand Pencil">🖌️ Pencil</button>
-                <button class="tool-btn" id="btn-zone-shape-rect" onclick="setZoneShape('rect')" title="Draw Filled Box">██ Box</button>
+            
+            <!-- Diff Drive Controller Selection -->
+            <div class="arch-group">
+                <label class="arch-label">Diff Drive Controller</label>
+                <div class="arch-options-grid">
+                    <button class="arch-btn active" id="btn-ctrl-native" onclick="selectControllerMode('native')" title="Standard Nav2 DWB Local Planner">
+                        <span class="arch-btn-icon">⚡</span>
+                        <div class="arch-btn-text">
+                            <strong>Native DWB</strong>
+                            <small>Standard OK</small>
+                        </div>
+                    </button>
+                    <button class="arch-btn" id="btn-ctrl-pid" onclick="selectControllerMode('pid')" title="S-Curve Motion Profile & Gain Scheduling Pure Pursuit">
+                        <span class="arch-btn-icon">📈</span>
+                        <div class="arch-btn-text">
+                            <strong>PID Profiled</strong>
+                            <small>S-Curve Jerk</small>
+                        </div>
+                    </button>
+                    <button class="arch-btn" id="btn-ctrl-smc" onclick="selectControllerMode('smc')" title="Alipour Dynamic Sliding Mode Controller">
+                        <span class="arch-btn-icon">🌊</span>
+                        <div class="arch-btn-text">
+                            <strong>SMC Control</strong>
+                            <small>Sliding Mode</small>
+                        </div>
+                    </button>
+                </div>
             </div>
-            <label class="range-row" style="padding-left: 0;">
-                <span>Brush Size</span>
-                <input type="range" id="zone-brush-size" min="1" max="25" value="5" oninput="document.getElementById('zone-brush-size-val').textContent = this.value + ' px'">
-                <span id="zone-brush-size-val" style="font-size:11px; width: 35px; text-align: right;">5 px</span>
-            </label>
-            <div style="display: flex; gap: 4px; margin-top: 6px;">
-                <button class="tool-btn" onclick="undoZoneEdit()" id="btn-zone-undo" disabled title="Undo (Ctrl+Z)">↩️ Undo</button>
-                <button class="tool-btn" onclick="redoZoneEdit()" id="btn-zone-redo" disabled title="Redo (Ctrl+Y)">↪️ Redo</button>
-                <button class="tool-btn" onclick="resetZoneEdit()" style="color:#ff8888;" title="Reset back to original">🔄 Reset</button>
+
+            <!-- Path Planner Selection -->
+            <div class="arch-group" style="margin-top: 8px;">
+                <label class="arch-label">Path Planning Algorithm</label>
+                <div class="arch-options-grid">
+                    <button class="arch-btn active" id="btn-plan-native" onclick="selectPlannerMode('native')" title="Nav2 Costmap Navfn A* Planner">
+                        <span class="arch-btn-icon">🗺️</span>
+                        <div class="arch-btn-text">
+                            <strong>Nav2 Navfn</strong>
+                            <small>Costmap A*</small>
+                        </div>
+                    </button>
+                    <button class="arch-btn" id="btn-plan-bfs" onclick="selectPlannerMode('bfs')" title="Breadth-First Search Uniform Wavefront">
+                        <span class="arch-btn-icon">🧭</span>
+                        <div class="arch-btn-text">
+                            <strong>BFS Grid</strong>
+                            <small>Wavefront</small>
+                        </div>
+                    </button>
+                    <button class="arch-btn" id="btn-plan-astar" onclick="selectPlannerMode('astar')" title="A* Euclidean Optimal with Obstacle Clearance">
+                        <span class="arch-btn-icon">✨</span>
+                        <div class="arch-btn-text">
+                            <strong>A* Optimal</strong>
+                            <small>Clearance Pen.</small>
+                        </div>
+                    </button>
+                </div>
             </div>
-            <div style="margin-top: 10px;">
-                <button class="btn-primary" onclick="saveZones()" style="width:100%; margin-top:6px; background: linear-gradient(135deg, #1f6feb, #238636); padding: 8px; font-size: 11px;">
-                    💾 Save Zones & Apply
-                </button>
-                <div id="zone-edit-status" class="panel-note" style="margin-top: 4px;">Ready to draw zones</div>
+
+            <!-- Parameter Details / Telemetry Inspector -->
+            <div id="arch-param-card" class="arch-param-card">
+                <div class="arch-param-header">
+                    <span id="arch-param-title">Active: Native DWB + Nav2 A*</span>
+                    <button class="btn-revert-ok" onclick="revertToStandardOK()" title="Revert immediately to Standard OK Native mode">🛡️ Fallback OK</button>
+                </div>
+                <div id="arch-param-grid" class="arch-param-grid">
+                    <div><span>Speed:</span> <strong>0.18 m/s</strong></div>
+                    <div><span>Accel:</span> <strong>0.40 m/s²</strong></div>
+                    <div><span>Decel:</span> <strong>-0.50 m/s²</strong></div>
+                    <div><span>Recovery:</span> <strong>Stop & BackUp</strong></div>
+                </div>
             </div>
         </div>
-        <div class="display-section" id="section-map-editor">
+        <div class="display-section" id="section-zone-editor">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <h2 style="margin:0;">🛡️ Zone Tool (Adobe Rect)</h2>
+                <span id="zone-mode-badge" style="background: rgba(239,68,68,0.2); color: #fca5a5; font-size: 10px; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(239,68,68,0.4);">Overlay</span>
+            </div>
+            
+            <!-- Tool Buttons: Adobe Style Rectangle Tools -->
+            <div class="zone-tools-grid">
+                <button class="tool-btn active" id="btn-tool-keepout" onclick="setZoneTool('keepout')" title="Draw Keepout Rectangle (Shortcut: K)">
+                    <span style="font-size:13px;">🟥</span> Keepout
+                </button>
+                <button class="tool-btn" id="btn-tool-speed" onclick="setZoneTool('speed')" title="Draw Speed Limit Rectangle (Shortcut: S)">
+                    <span style="font-size:13px;">🟨</span> Speed Box
+                </button>
+                <button class="tool-btn" id="btn-tool-select" onclick="setZoneTool('select')" title="Select & Transform Handles (Shortcut: V)">
+                    <span style="font-size:13px;">↖</span> Select
+                </button>
+            </div>
+
+            <!-- Selected Zone Inspector -->
+            <div id="zone-inspector" class="zone-inspector" style="display: none;">
+                <div class="inspector-header">
+                    <span id="inspector-title" style="font-weight: 600; font-size: 11px; color: #58a6ff;">Selected Zone</span>
+                    <button class="btn-icon-danger" onclick="deleteSelectedZone()" title="Delete zone (Del)">🗑️</button>
+                </div>
+                <div class="inspector-fields">
+                    <label class="field-row">
+                        <span>Label</span>
+                        <input type="text" id="zone-prop-name" oninput="updateSelectedZoneProp('name', this.value)">
+                    </label>
+                    <label class="field-row">
+                        <span>Type</span>
+                        <select id="zone-prop-type" onchange="updateSelectedZoneProp('type', this.value)">
+                            <option value="keepout">🚫 Keepout (Restricted)</option>
+                            <option value="speed">⚠️ Speed Limit Zone</option>
+                        </select>
+                    </label>
+                    <div id="zone-speed-field" class="field-row" style="display: none;">
+                        <span>Max Speed</span>
+                        <select id="zone-prop-speed" onchange="updateSelectedZoneProp('speedLimit', parseFloat(this.value))">
+                            <option value="0.3">30% (0.05 m/s)</option>
+                            <option value="0.5" selected>50% (0.09 m/s)</option>
+                            <option value="0.7">70% (0.13 m/s)</option>
+                        </select>
+                    </div>
+                    <div class="dim-grid">
+                        <label><span>W:</span><input type="number" step="0.05" min="0.1" id="zone-prop-w" oninput="updateSelectedZoneProp('w', parseFloat(this.value))"></label>
+                        <label><span>H:</span><input type="number" step="0.05" min="0.1" id="zone-prop-h" oninput="updateSelectedZoneProp('h', parseFloat(this.value))"></label>
+                        <label><span>X:</span><input type="number" step="0.05" id="zone-prop-x" oninput="updateSelectedZoneProp('x', parseFloat(this.value))"></label>
+                        <label><span>Y:</span><input type="number" step="0.05" id="zone-prop-y" oninput="updateSelectedZoneProp('y', parseFloat(this.value))"></label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Zones List (Adobe Layers Style) -->
+            <div class="zone-list-container" style="margin-top: 8px;">
+                <div class="zone-list-header">
+                    <span>Active Zones (<span id="zone-count">0</span>)</span>
+                    <button class="btn-text-danger" onclick="clearAllZones()" title="Remove all zones">Clear all</button>
+                </div>
+                <div id="zone-list-items" class="zone-list-items">
+                    <div class="empty-zones-hint">No zones defined.<br>Drag on the map to draw a rectangle!</div>
+                </div>
+            </div>
+
+            <div style="margin-top: 8px;">
+                <button class="btn-primary" onclick="saveZones()" style="width:100%; background: linear-gradient(135deg, #1f6feb, #238636); padding: 8px; font-size: 11px; font-weight: 600;">
+                    💾 Save Zones & Apply to Nav2
+                </button>
+                <div id="zone-edit-status" class="panel-note" style="margin-top: 4px; text-align: center;">Ready to draw zones</div>
+            </div>
+        </div>
+        <div class="display-section" id="section-map-editor" style="display: none;">
             <h2>🎨 Map Editor (GIMP Tools)</h2>
             <div style="display: flex; gap: 4px; margin-bottom: 6px;">
                 <button class="tool-btn active" id="btn-edit-val-wall" onclick="setMapEditVal(100)" title="Draw Wall (Black/100)">⬛ Wall</button>
@@ -150,8 +271,8 @@
         <div class="pane-heading">3D view <span id="map-topic-label">/map · Waiting for data</span></div>
         <div id="map-toolbar" role="toolbar" aria-label="Navigation tools">
             <button class="tool-btn active" id="btn-view-mode" onclick="setMode('view')">Interact</button>
-            <button class="tool-btn" id="btn-edit-mode" onclick="setMode('edit_map')">🎨 Edit Map</button>
-            <button class="tool-btn" id="btn-edit-zone-mode" onclick="setMode('edit_zone')">🛡️ Edit Zones</button>
+            <button class="tool-btn" id="btn-edit-mode" onclick="setMode('edit_map')" style="display: none;">🎨 Edit Map</button>
+            <button class="tool-btn" id="btn-edit-zone-mode" onclick="setMode('edit_zone')" title="Adobe Rectangle Zone Tool">🛡️ Zone Tool</button>
             <button class="tool-btn" id="btn-init-mode" onclick="setMode('initial_pose')">2D Pose Estimate</button>
             <button class="tool-btn" id="btn-goal-mode" onclick="setMode('goal')">Nav2 Goal</button>
             <div class="tool-separator"></div>
@@ -161,6 +282,37 @@
 
         <div id="map-canvas-wrap">
             <div id="viewer-3d" style="display: block; width: 100%; height: 100%;"></div>
+
+            <!-- Vector SVG Overlay for Adobe Rectangle Zones -->
+            <svg id="zone-svg-overlay">
+                <defs>
+                    <!-- High visibility diagonal stripes for Keepout -->
+                    <pattern id="keepout-stripes" width="16" height="16" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+                        <line x1="0" y1="0" x2="0" y2="16" stroke="rgba(239, 68, 68, 0.75)" stroke-width="6" />
+                        <line x1="0" y1="0" x2="0" y2="16" stroke="rgba(185, 28, 28, 0.35)" stroke-width="16" />
+                    </pattern>
+                    <!-- High visibility diagonal stripes for Speed Limit -->
+                    <pattern id="speed-stripes" width="16" height="16" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+                        <line x1="0" y1="0" x2="0" y2="16" stroke="rgba(245, 158, 11, 0.75)" stroke-width="6" />
+                        <line x1="0" y1="0" x2="0" y2="16" stroke="rgba(180, 83, 9, 0.35)" stroke-width="16" />
+                    </pattern>
+                    <!-- Glow Filters -->
+                    <filter id="glow-red" x="-20%" y="-20%" width="140%" height="140%">
+                        <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#ef4444" flood-opacity="0.8"/>
+                    </filter>
+                    <filter id="glow-amber" x="-20%" y="-20%" width="140%" height="140%">
+                        <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#f59e0b" flood-opacity="0.8"/>
+                    </filter>
+                    <filter id="badge-shadow" x="-30%" y="-30%" width="160%" height="160%">
+                        <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000000" flood-opacity="0.85"/>
+                    </filter>
+                </defs>
+                <!-- Dynamic Zone Elements Rendered Here -->
+                <g id="zone-svg-polygons"></g>
+                <g id="zone-svg-badges"></g>
+                <g id="zone-svg-handles"></g>
+                <g id="zone-svg-preview"></g>
+            </svg>
 
             <!-- Placeholder when no map -->
             <div id="map-overlay">

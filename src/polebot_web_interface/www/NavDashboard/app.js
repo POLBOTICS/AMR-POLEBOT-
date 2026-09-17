@@ -114,6 +114,7 @@ function subscribeTopics() {
     send({ op: 'subscribe', topic: '/local_costmap/costmap', type: 'nav_msgs/msg/OccupancyGrid', throttle_rate: 200 });
 
     send({ op: 'subscribe', topic: '/plan', type: 'nav_msgs/msg/Path', throttle_rate: 250 });
+    send({ op: 'subscribe', topic: '/planned_path', type: 'nav_msgs/msg/Path', throttle_rate: 250 });
     send({ op: 'advertise', topic: '/initialpose', type: 'geometry_msgs/msg/PoseWithCovarianceStamped' });
     for (const name of ['global', 'local']) send({ op: 'subscribe', topic: `/${name}_costmap/costmap_updates`, type: 'map_msgs/msg/OccupancyGridUpdate', throttle_rate: 0 });
     send({ op: 'subscribe', topic: '/tf', type: 'tf2_msgs/msg/TFMessage', throttle_rate: 0 });
@@ -166,7 +167,7 @@ function handleMessage(msg) {
         onNavStatusReceived(msg.msg);
     } else if (msg.topic.endsWith('_costmap/costmap_updates')) {
         updateCostmapRegion(msg.topic.startsWith('/global') ? 'global' : 'local', msg.msg);
-    } else if (msg.topic === '/plan') {
+    } else if (msg.topic === '/plan' || msg.topic === '/planned_path') {
         drawPath(msg.msg);
     } else if (msg.topic === '/global_costmap/costmap') {
         cachedCostmaps.global = msg.msg;
@@ -183,7 +184,7 @@ function handleMessage(msg) {
 }
 
 // Smoothing parameter (EMA) for jitter reduction
-const POSE_ALPHA = 0.4; // Can be higher now since backend provides stable tf
+const POSE_ALPHA = 1.0; // Set to 1.0 for true real-time AMCL/TF matching without lag
 
 // ── Pose / Status Updates ─────────────────────────────
 
@@ -448,7 +449,13 @@ function fetchMapList() {
         })
         .catch(err => console.error("Failed to fetch map list", err));
 }
-window.addEventListener('DOMContentLoaded', fetchMapList);
+
+if (typeof window !== 'undefined' && window?.addEventListener) {
+    window.addEventListener('DOMContentLoaded', () => {
+        fetchMapList();
+        if (typeof fetchMotionModes === 'function') fetchMotionModes();
+    });
+}
 
 function init3DViewer() {
     if (viewer3D) return;
@@ -560,6 +567,9 @@ function animate3D() {
     // Update map plane from 2D data
     update3DMap();
     update3DScan();
+
+    // Render Vector SVG Zone Overlay
+    renderZoneOverlay();
 
     applyLayerVisibility();
     renderer3D.render(scene3D, camera3D);
@@ -690,70 +700,72 @@ let editUndoStack = [];
 let editRedoStack = [];
 let originalMapData = null;    // Int8Array copy of raw unedited map
 
-// --- Zone Editor State ---
-let isZoneEditing = false;
-let zoneType = 'keepout'; // 'keepout', 'speed', 'free'
-let zoneShape = 'rect';
-let zoneBrushSize = 5;
-let zoneData = null; // { w, h, raw: Int8Array, bitmap: HTMLCanvasElement }
+// --- Adobe-Style Vector Zone Editor State ---
+let zones = []; // Array of { id, name, type: 'keepout'|'speed', speedLimit: 0.5, x, y, w, h, visible: true }
+let selectedZoneId = null;
+let zoneTool = 'keepout'; // 'keepout', 'speed', 'select'
+let zoneOverlayVisible = true;
+let isDrawingZone = false;
+let zoneDrawStart = null; // { wx, wy }
+let zoneDrawCurrent = null; // { wx, wy }
+let zoneDragState = null; // { mode: 'move'|'resize', handle, startWx, startWy, origX, origY, origW, origH }
 let zoneMesh3D = null;
-let zoneUndoStack = [];
-let zoneRedoStack = [];
-let activeZoneChanges = new Map();
-let lastZonePencilCell = null;
-let editZoneStartCell = null;
 
-function setZoneType(type) {
-    zoneType = type;
-    document.getElementById('btn-zone-keepout').classList.toggle('active', type === 'keepout');
-    document.getElementById('btn-zone-speed').classList.toggle('active', type === 'speed');
-    document.getElementById('btn-zone-free').classList.toggle('active', type === 'free');
-}
-function setZoneShape(shape) {
-    zoneShape = shape;
-    document.getElementById('btn-zone-shape-pencil').classList.toggle('active', shape === 'pencil');
-    document.getElementById('btn-zone-shape-rect').classList.toggle('active', shape === 'rect');
-}
-document.getElementById('zone-brush-size').addEventListener('input', function () {
-    zoneBrushSize = parseInt(this.value);
-});
+function setZoneTool(tool) {
+    zoneTool = tool;
+    const btnKeepout = document.getElementById('btn-tool-keepout');
+    const btnSpeed = document.getElementById('btn-tool-speed');
+    const btnSelect = document.getElementById('btn-tool-select');
+    if (btnKeepout) btnKeepout.classList.toggle('active', tool === 'keepout');
+    if (btnSpeed) btnSpeed.classList.toggle('active', tool === 'speed');
+    if (btnSelect) btnSelect.classList.toggle('active', tool === 'select');
 
-function initZoneData() {
-    if (!mapData || !mapInfo) return;
-    if (zoneData && zoneData.w === mapData.w && zoneData.h === mapData.h) return;
-    const w = mapData.w;
-    const h = mapData.h;
-    const raw = new Int8Array(w * h); // 0 = free
-
-    const off = document.createElement('canvas');
-    off.width = w; off.height = h;
-    const octx = off.getContext('2d');
-    const img = octx.createImageData(w, h);
-    for (let i = 0; i < w * h; i++) {
-        img.data[i * 4 + 3] = 0; // completely transparent
+    if (interactMode !== 'edit_zone') {
+        setMode('edit_zone');
     }
-    octx.putImageData(img, 0, 0);
-
-    zoneData = { w, h, raw, bitmap: off };
-
-    // Create 3D Mesh
-    if (zoneMesh3D && scene3D) disposeMesh(zoneMesh3D);
-    const tex = new THREE.CanvasTexture(zoneData.bitmap);
-    tex.magFilter = THREE.NearestFilter;
-    tex.minFilter = THREE.NearestFilter;
-    const geo = new THREE.PlaneGeometry(w * mapInfo.resolution, h * mapInfo.resolution);
-    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide });
-    zoneMesh3D = new THREE.Mesh(geo, mat);
-
-    const ox = mapInfo.origin.position.x;
-    const oy = mapInfo.origin.position.y;
-    zoneMesh3D.position.set(ox + (w * mapInfo.resolution) / 2, oy + (h * mapInfo.resolution) / 2, 0.015); // Above global costmap (0.01), below local (0.02)
-    scene3D.add(zoneMesh3D);
+    const badge = document.getElementById('zone-mode-badge');
+    if (badge) {
+        badge.textContent = tool === 'keepout' ? 'Keepout Tool' : (tool === 'speed' ? 'Speed Tool' : 'Select Tool');
+        badge.style.background = tool === 'keepout' ? 'rgba(239,68,68,0.25)' : (tool === 'speed' ? 'rgba(245,158,11,0.25)' : 'rgba(88,166,255,0.25)');
+        badge.style.color = tool === 'keepout' ? '#fca5a5' : (tool === 'speed' ? '#fde68a' : '#58a6ff');
+    }
+    renderZoneOverlay();
 }
 
-function updateZoneUndoRedoButtons() {
-    document.getElementById('btn-zone-undo').disabled = zoneUndoStack.length === 0;
-    document.getElementById('btn-zone-redo').disabled = zoneRedoStack.length === 0;
+function toggleZoneOverlayVisibility(visible) {
+    zoneOverlayVisible = visible;
+    const svg = document.getElementById('zone-svg-overlay');
+    if (svg) svg.style.display = visible ? 'block' : 'none';
+    if (zoneMesh3D) zoneMesh3D.visible = visible;
+    renderZoneOverlay();
+}
+
+function worldToScreen(wx, wy, wz = 0) {
+    if (!renderer3D || !camera3D) return null;
+    const rect = renderer3D.domElement.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return null;
+    const v = new THREE.Vector3(wx, wy, wz);
+    v.project(camera3D);
+    if (v.z > 1) return null; // Behind camera
+    const sx = (v.x * 0.5 + 0.5) * rect.width;
+    const sy = (-(v.y * 0.5) + 0.5) * rect.height;
+    return { x: sx, y: sy };
+}
+
+function screenToWorld(screenX, screenY) {
+    if (!renderer3D || !camera3D) return null;
+    const rect = renderer3D.domElement.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return null;
+    const ndc = new THREE.Vector2(
+        (screenX / rect.width) * 2 - 1,
+        -(screenY / rect.height) * 2 + 1
+    );
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc, camera3D);
+    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+    const target = new THREE.Vector3();
+    const hit = ray.ray.intersectPlane(plane, target);
+    return hit || null;
 }
 
 let isMapEditing = false;
@@ -873,185 +885,503 @@ function paintBoxBetween(gx0, gy0, gx1, gy1) {
 }
 
 
-function paintZoneBrushAt(gx, gy) {
-    if (!zoneData) return;
-    const w = zoneData.w; const h = zoneData.h;
-    const r = (zoneBrushSize - 1) / 2;
-    const r2 = r * r;
-    const minX = Math.max(0, Math.floor(gx - r));
-    const maxX = Math.min(w - 1, Math.ceil(gx + r));
-    const minY = Math.max(0, Math.floor(gy - r));
-    const maxY = Math.min(h - 1, Math.ceil(gy + r));
+function renderZoneOverlay() {
+    const svg = document.getElementById('zone-svg-overlay');
+    if (!svg || !camera3D || !renderer3D) return;
 
-    const ctx = zoneData.bitmap.getContext('2d');
+    const gPolys = document.getElementById('zone-svg-polygons');
+    const gBadges = document.getElementById('zone-svg-badges');
+    const gHandles = document.getElementById('zone-svg-handles');
+    const gPreview = document.getElementById('zone-svg-preview');
 
-    let val = 0; let rr = 0, gg = 0, bb = 0, aa = 0;
-    if (zoneType === 'keepout') { val = 1; rr = 255; gg = 0; bb = 0; aa = 128; } // Red
-    else if (zoneType === 'speed') { val = 2; rr = 255; gg = 255; bb = 0; aa = 128; } // Yellow
-    // free -> val=0, aa=0
+    if (!gPolys || !gBadges || !gHandles || !gPreview) return;
 
-    for (let y = minY; y <= maxY; y++) {
-        for (let x = minX; x <= maxX; x++) {
-            if ((x - gx) * (x - gx) + (y - gy) * (y - gy) <= r2 + 0.25) {
-                const idx = y * w + x;
-                const oldVal = zoneData.raw[idx];
-                if (oldVal !== val) {
-                    if (!activeZoneChanges.has(idx)) activeZoneChanges.set(idx, { idx, old: oldVal, new: val, x, y });
-                    else activeZoneChanges.get(idx).new = val;
-                    zoneData.raw[idx] = val;
+    gPolys.innerHTML = '';
+    gBadges.innerHTML = '';
+    gHandles.innerHTML = '';
+    gPreview.innerHTML = '';
 
-                    const imgData = ctx.createImageData(1, 1);
-                    imgData.data[0] = rr; imgData.data[1] = gg; imgData.data[2] = bb; imgData.data[3] = aa;
-                    ctx.putImageData(imgData, x, h - 1 - y);
-                }
+    if (!zoneOverlayVisible) return;
+
+    for (const zone of zones) {
+        if (!zone.visible) continue;
+
+        const s0 = worldToScreen(zone.x, zone.y);
+        const s1 = worldToScreen(zone.x + zone.w, zone.y);
+        const s2 = worldToScreen(zone.x + zone.w, zone.y + zone.h);
+        const s3 = worldToScreen(zone.x, zone.y + zone.h);
+
+        if (!s0 || !s1 || !s2 || !s3) continue;
+
+        const pts = `${s0.x.toFixed(1)},${s0.y.toFixed(1)} ${s1.x.toFixed(1)},${s1.y.toFixed(1)} ${s2.x.toFixed(1)},${s2.y.toFixed(1)} ${s3.x.toFixed(1)},${s3.y.toFixed(1)}`;
+        const isSelected = zone.id === selectedZoneId;
+        const isKeepout = zone.type === 'keepout';
+
+        // 1. Polygon Fill & Border
+        const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        poly.setAttribute('points', pts);
+        poly.setAttribute('class', 'zone-svg-poly' + (isSelected ? ' selected' : ''));
+        poly.setAttribute('fill', isKeepout ? 'url(#keepout-stripes)' : 'url(#speed-stripes)');
+        poly.setAttribute('stroke', isKeepout ? '#ef4444' : '#f59e0b');
+        poly.setAttribute('stroke-width', isSelected ? '3.5' : '2.5');
+        poly.setAttribute('filter', isKeepout ? 'url(#glow-red)' : 'url(#glow-amber)');
+        poly.setAttribute('opacity', '0.9');
+        gPolys.appendChild(poly);
+
+        if (isSelected) {
+            // Extra Adobe bounding outline
+            const selOutline = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            selOutline.setAttribute('points', pts);
+            selOutline.setAttribute('fill', 'none');
+            selOutline.setAttribute('stroke', '#00a8ff');
+            selOutline.setAttribute('stroke-width', '2');
+            selOutline.setAttribute('stroke-dasharray', '5,3');
+            gPolys.appendChild(selOutline);
+        }
+
+        // 2. Centered Floating Pill Badge
+        const sc = worldToScreen(zone.x + zone.w / 2, zone.y + zone.h / 2);
+        if (sc) {
+            const badgeG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            badgeG.setAttribute('class', 'zone-svg-badge');
+            badgeG.setAttribute('filter', 'url(#badge-shadow)');
+
+            const labelText = isKeepout ? '🚫 KEEPOUT' : `⚠️ SPEED LIMIT (${Math.round((zone.speedLimit || 0.5) * 100)}%)`;
+            const dimText = `${zone.w.toFixed(2)}m × ${zone.h.toFixed(2)}m`;
+
+            const bWidth = Math.max(120, labelText.length * 7 + 24);
+            const bHeight = 34;
+            const bx = sc.x - bWidth / 2;
+            const by = sc.y - bHeight / 2;
+
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', bx.toFixed(1));
+            rect.setAttribute('y', by.toFixed(1));
+            rect.setAttribute('width', bWidth);
+            rect.setAttribute('height', bHeight);
+            rect.setAttribute('rx', '7');
+            rect.setAttribute('fill', 'rgba(13, 17, 23, 0.92)');
+            rect.setAttribute('stroke', isKeepout ? '#ef4444' : '#f59e0b');
+            rect.setAttribute('stroke-width', '1.5');
+            badgeG.appendChild(rect);
+
+            const text1 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text1.setAttribute('x', sc.x.toFixed(1));
+            text1.setAttribute('y', (by + 14).toFixed(1));
+            text1.setAttribute('text-anchor', 'middle');
+            text1.setAttribute('fill', isKeepout ? '#fca5a5' : '#fde68a');
+            text1.setAttribute('font-size', '10px');
+            text1.setAttribute('font-weight', '700');
+            text1.setAttribute('font-family', 'Inter, sans-serif');
+            text1.textContent = labelText;
+            badgeG.appendChild(text1);
+
+            const text2 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text2.setAttribute('x', sc.x.toFixed(1));
+            text2.setAttribute('y', (by + 27).toFixed(1));
+            text2.setAttribute('text-anchor', 'middle');
+            text2.setAttribute('fill', '#8b949e');
+            text2.setAttribute('font-size', '9px');
+            text2.setAttribute('font-family', "'JetBrains Mono', monospace");
+            text2.textContent = dimText;
+            badgeG.appendChild(text2);
+
+            gBadges.appendChild(badgeG);
+        }
+
+        // 3. Adobe 8 Transform Handles (if selected and in edit_zone mode)
+        if (isSelected && interactMode === 'edit_zone') {
+            const handles = [
+                { name: 'nw', wx: zone.x, wy: zone.y + zone.h },
+                { name: 'ne', wx: zone.x + zone.w, wy: zone.y + zone.h },
+                { name: 'se', wx: zone.x + zone.w, wy: zone.y },
+                { name: 'sw', wx: zone.x, wy: zone.y },
+                { name: 'n', wx: zone.x + zone.w / 2, wy: zone.y + zone.h },
+                { name: 's', wx: zone.x + zone.w / 2, wy: zone.y },
+                { name: 'e', wx: zone.x + zone.w, wy: zone.y + zone.h / 2 },
+                { name: 'w', wx: zone.x, wy: zone.y + zone.h / 2 },
+            ];
+
+            for (const h of handles) {
+                const sp = worldToScreen(h.wx, h.wy);
+                if (!sp) continue;
+                const hRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                hRect.setAttribute('class', 'zone-svg-handle');
+                hRect.setAttribute('data-handle', h.name);
+                hRect.setAttribute('x', (sp.x - 4.5).toFixed(1));
+                hRect.setAttribute('y', (sp.y - 4.5).toFixed(1));
+                hRect.setAttribute('width', '9');
+                hRect.setAttribute('height', '9');
+                gHandles.appendChild(hRect);
+            }
+
+            // Dimension tool tag attached above top edge
+            const topMid = worldToScreen(zone.x + zone.w / 2, zone.y + zone.h);
+            if (topMid) {
+                const dimTag = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                dimTag.setAttribute('class', 'zone-svg-badge');
+                const tagText = `📏 ${zone.w.toFixed(2)}m × ${zone.h.toFixed(2)}m`;
+                const tagW = tagText.length * 6.8 + 14;
+                const tagH = 20;
+
+                const tr = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                tr.setAttribute('x', (topMid.x - tagW / 2).toFixed(1));
+                tr.setAttribute('y', (topMid.y - 26).toFixed(1));
+                tr.setAttribute('width', tagW);
+                tr.setAttribute('height', tagH);
+                tr.setAttribute('rx', '4');
+                tr.setAttribute('fill', '#00a8ff');
+                dimTag.appendChild(tr);
+
+                const tt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                tt.setAttribute('x', topMid.x.toFixed(1));
+                tt.setAttribute('y', (topMid.y - 12).toFixed(1));
+                tt.setAttribute('text-anchor', 'middle');
+                tt.setAttribute('fill', '#ffffff');
+                tt.setAttribute('font-size', '10px');
+                tt.setAttribute('font-weight', '700');
+                tt.setAttribute('font-family', 'Inter, sans-serif');
+                tt.textContent = tagText;
+                dimTag.appendChild(tt);
+
+                gHandles.appendChild(dimTag);
+            }
+        }
+    }
+
+    // 4. Live Drawing Preview Rectangle
+    if (isDrawingZone && zoneDrawStart && zoneDrawCurrent) {
+        const minX = Math.min(zoneDrawStart.wx, zoneDrawCurrent.wx);
+        const maxX = Math.max(zoneDrawStart.wx, zoneDrawCurrent.wx);
+        const minY = Math.min(zoneDrawStart.wy, zoneDrawCurrent.wy);
+        const maxY = Math.max(zoneDrawStart.wy, zoneDrawCurrent.wy);
+
+        const s0 = worldToScreen(minX, minY);
+        const s1 = worldToScreen(maxX, minY);
+        const s2 = worldToScreen(maxX, maxY);
+        const s3 = worldToScreen(minX, maxY);
+
+        if (s0 && s1 && s2 && s3) {
+            const pts = `${s0.x.toFixed(1)},${s0.y.toFixed(1)} ${s1.x.toFixed(1)},${s1.y.toFixed(1)} ${s2.x.toFixed(1)},${s2.y.toFixed(1)} ${s3.x.toFixed(1)},${s3.y.toFixed(1)}`;
+            const isKeepout = zoneTool === 'keepout';
+
+            const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            poly.setAttribute('points', pts);
+            poly.setAttribute('fill', isKeepout ? 'url(#keepout-stripes)' : 'url(#speed-stripes)');
+            poly.setAttribute('stroke', isKeepout ? '#ef4444' : '#f59e0b');
+            poly.setAttribute('stroke-width', '2.5');
+            poly.setAttribute('stroke-dasharray', '6,3');
+            poly.setAttribute('opacity', '0.85');
+            gPreview.appendChild(poly);
+
+            // Floating dimension tooltip near cursor
+            const sc = worldToScreen((minX + maxX) / 2, (minY + maxY) / 2);
+            if (sc) {
+                const tipG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                tipG.setAttribute('class', 'zone-svg-badge');
+                const text = `${(maxX - minX).toFixed(2)}m × ${(maxY - minY).toFixed(2)}m`;
+                const tw = text.length * 7 + 16;
+                const th = 22;
+
+                const tr = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                tr.setAttribute('x', (sc.x - tw / 2).toFixed(1));
+                tr.setAttribute('y', (sc.y - th / 2).toFixed(1));
+                tr.setAttribute('width', tw);
+                tr.setAttribute('height', th);
+                tr.setAttribute('rx', '5');
+                tr.setAttribute('fill', 'rgba(13, 17, 23, 0.95)');
+                tr.setAttribute('stroke', isKeepout ? '#ef4444' : '#f59e0b');
+                tr.setAttribute('stroke-width', '1.5');
+                tipG.appendChild(tr);
+
+                const tt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                tt.setAttribute('x', sc.x.toFixed(1));
+                tt.setAttribute('y', (sc.y + 4).toFixed(1));
+                tt.setAttribute('text-anchor', 'middle');
+                tt.setAttribute('fill', '#ffffff');
+                tt.setAttribute('font-size', '10px');
+                tt.setAttribute('font-weight', '700');
+                tt.setAttribute('font-family', "'JetBrains Mono', monospace");
+                tt.textContent = text;
+                tipG.appendChild(tt);
+
+                gPreview.appendChild(tipG);
             }
         }
     }
 }
-function paintZoneLineBetween(x0, y0, x1, y1) {
-    const dx = Math.abs(x1 - x0); const dy = -Math.abs(y1 - y0);
-    const sx = x0 < x1 ? 1 : -1; const sy = y0 < y1 ? 1 : -1;
-    let err = dx + dy;
-    while (true) {
-        paintZoneBrushAt(x0, y0);
-        if (x0 === x1 && y0 === y1) break;
-        const e2 = 2 * err;
-        if (e2 >= dy) { err += dy; x0 += sx; }
-        if (e2 <= dx) { err += dx; y0 += sy; }
-    }
-}
-function paintZoneBoxBetween(x0, y0, x1, y1) {
-    const minX = Math.min(x0, x1); const maxX = Math.max(x0, x1);
-    const minY = Math.min(y0, y1); const maxY = Math.max(y0, y1);
-    for (let y = minY; y <= maxY; y++) {
-        for (let x = minX; x <= maxX; x++) {
-            paintZoneBrushAt(x, y);
+
+function updateZoneUI() {
+    const inspector = document.getElementById('zone-inspector');
+    const selected = zones.find(z => z.id === selectedZoneId);
+
+    if (inspector) {
+        if (selected) {
+            inspector.style.display = 'block';
+            const nameInput = document.getElementById('zone-prop-name');
+            if (nameInput) nameInput.value = selected.name || '';
+            const typeSelect = document.getElementById('zone-prop-type');
+            if (typeSelect) typeSelect.value = selected.type;
+            const speedField = document.getElementById('zone-speed-field');
+            if (speedField) speedField.style.display = selected.type === 'speed' ? 'flex' : 'none';
+            const speedSelect = document.getElementById('zone-prop-speed');
+            if (speedSelect) speedSelect.value = String(selected.speedLimit || 0.5);
+
+            const wInput = document.getElementById('zone-prop-w');
+            if (wInput) wInput.value = selected.w.toFixed(2);
+            const hInput = document.getElementById('zone-prop-h');
+            if (hInput) hInput.value = selected.h.toFixed(2);
+            const xInput = document.getElementById('zone-prop-x');
+            if (xInput) xInput.value = selected.x.toFixed(2);
+            const yInput = document.getElementById('zone-prop-y');
+            if (yInput) yInput.value = selected.y.toFixed(2);
+        } else {
+            inspector.style.display = 'none';
         }
+    }
+
+    // Active zones list
+    const countEl = document.getElementById('zone-count');
+    if (countEl) countEl.textContent = zones.length;
+
+    const listEl = document.getElementById('zone-list-items');
+    if (listEl) {
+        if (zones.length === 0) {
+            listEl.innerHTML = '<div class="empty-zones-hint">No zones defined.<br>Drag on the map to draw a rectangle!</div>';
+        } else {
+            listEl.innerHTML = '';
+            zones.forEach(z => {
+                const card = document.createElement('div');
+                card.className = `zone-item-card type-${z.type}${z.id === selectedZoneId ? ' selected' : ''}`;
+                card.onclick = () => { selectZone(z.id); };
+
+                const icon = z.type === 'keepout' ? '🚫' : '⚠️';
+                const sub = `${z.w.toFixed(2)}m × ${z.h.toFixed(2)}m · (${z.x.toFixed(1)}, ${z.y.toFixed(1)})`;
+
+                card.innerHTML = `
+                    <span style="font-size: 13px;">${icon}</span>
+                    <div class="zone-item-info">
+                        <div class="zone-item-title">${z.name || (z.type === 'keepout' ? 'Keepout' : 'Speed Limit')}</div>
+                        <div class="zone-item-sub">${sub}</div>
+                    </div>
+                    <button class="zone-item-btn" title="Toggle visibility" onclick="event.stopPropagation(); toggleZoneItemVisibility('${z.id}')">
+                        ${z.visible ? '👁️' : '🕶️'}
+                    </button>
+                    <button class="zone-item-btn" style="color:#ff7b72;" title="Delete zone" onclick="event.stopPropagation(); deleteZoneById('${z.id}')">
+                        🗑️
+                    </button>
+                `;
+                listEl.appendChild(card);
+            });
+        }
+    }
+    renderZoneOverlay();
+}
+
+function updateZoneInspectorInputs(z) {
+    const wInput = document.getElementById('zone-prop-w');
+    if (wInput) wInput.value = z.w.toFixed(2);
+    const hInput = document.getElementById('zone-prop-h');
+    if (hInput) hInput.value = z.h.toFixed(2);
+    const xInput = document.getElementById('zone-prop-x');
+    if (xInput) xInput.value = z.x.toFixed(2);
+    const yInput = document.getElementById('zone-prop-y');
+    if (yInput) yInput.value = z.y.toFixed(2);
+}
+
+function updateSelectedZoneProp(prop, val) {
+    const z = zones.find(item => item.id === selectedZoneId);
+    if (!z) return;
+    if (prop === 'name') z.name = String(val);
+    else if (prop === 'type') {
+        z.type = val;
+        const sf = document.getElementById('zone-speed-field');
+        if (sf) sf.style.display = val === 'speed' ? 'flex' : 'none';
+    } else if (prop === 'speedLimit') z.speedLimit = Number(val);
+    else if (prop === 'w' && Number.isFinite(val) && val > 0.05) z.w = val;
+    else if (prop === 'h' && Number.isFinite(val) && val > 0.05) z.h = val;
+    else if (prop === 'x' && Number.isFinite(val)) z.x = val;
+    else if (prop === 'y' && Number.isFinite(val)) z.y = val;
+
+    updateZoneUI();
+    update3DZoneMesh();
+}
+
+function selectZone(id) {
+    selectedZoneId = id;
+    updateZoneUI();
+}
+
+function deleteSelectedZone() {
+    if (!selectedZoneId) return;
+    deleteZoneById(selectedZoneId);
+}
+
+function deleteZoneById(id) {
+    zones = zones.filter(z => z.id !== id);
+    if (selectedZoneId === id) selectedZoneId = null;
+    updateZoneUI();
+    update3DZoneMesh();
+    showWorkspaceMessage('Zone deleted');
+}
+
+function clearAllZones() {
+    if (zones.length === 0) return;
+    zones = [];
+    selectedZoneId = null;
+    updateZoneUI();
+    update3DZoneMesh();
+    showWorkspaceMessage('All zones cleared');
+}
+
+function toggleZoneItemVisibility(id) {
+    const z = zones.find(item => item.id === id);
+    if (z) {
+        z.visible = !z.visible;
+        updateZoneUI();
+        update3DZoneMesh();
     }
 }
 
-function startZoneEditing(gx, gy) {
-    if (!zoneData) initZoneData();
-    isZoneEditing = true;
-    activeZoneChanges.clear();
-    editZoneStartCell = { gx, gy };
-    if (zoneShape === 'pencil') {
-        lastZonePencilCell = { gx, gy };
-        paintZoneBrushAt(gx, gy);
+function rasterizeZonesToGrid() {
+    if (!mapData || !mapInfo) return null;
+    const w = mapData.w;
+    const h = mapData.h;
+    const res = mapInfo.resolution;
+    const ox = mapInfo.origin.position.x;
+    const oy = mapInfo.origin.position.y;
+    const raw = new Int8Array(w * h); // 0 = free
+
+    for (const z of zones) {
+        if (!z.visible) continue;
+        const val = z.type === 'keepout' ? 1 : 2;
+        const minGx = Math.max(0, Math.floor((z.x - ox) / res));
+        const maxGx = Math.min(w - 1, Math.ceil((z.x + z.w - ox) / res));
+        const minGy = Math.max(0, Math.floor((z.y - oy) / res));
+        const maxGy = Math.min(h - 1, Math.ceil((z.y + z.h - oy) / res));
+
+        for (let gy = minGy; gy <= maxGy; gy++) {
+            for (let gx = minGx; gx <= maxGx; gx++) {
+                const idx = gy * w + gx;
+                if (val === 1 || raw[idx] === 0) {
+                    raw[idx] = val;
+                }
+            }
+        }
     }
+    return raw;
 }
-function continueZoneEditing(gx, gy) {
-    if (!isZoneEditing || !zoneData) return;
-    if (zoneShape === 'pencil') {
-        if (lastZonePencilCell) paintZoneLineBetween(lastZonePencilCell.gx, lastZonePencilCell.gy, gx, gy);
-        else paintZoneBrushAt(gx, gy);
-        lastZonePencilCell = { gx, gy };
-    } else if (zoneShape === 'rect') {
-        // We could implement preview here, but to save complexity, we'll just draw on finish for box.
+
+function update3DZoneMesh() {
+    if (!mapData || !mapInfo || !scene3D) return;
+    const w = mapData.w;
+    const h = mapData.h;
+    const res = mapInfo.resolution;
+    const ox = mapInfo.origin.position.x;
+    const oy = mapInfo.origin.position.y;
+
+    if (!zoneMesh3D) {
+        const off = document.createElement('canvas');
+        off.width = w; off.height = h;
+        const tex = new THREE.CanvasTexture(off);
+        tex.magFilter = THREE.NearestFilter;
+        tex.minFilter = THREE.NearestFilter;
+        const geo = new THREE.PlaneGeometry(w * res, h * res);
+        const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide });
+        zoneMesh3D = new THREE.Mesh(geo, mat);
+        zoneMesh3D.position.set(ox + (w * res) / 2, oy + (h * res) / 2, 0.015);
+        scene3D.add(zoneMesh3D);
     }
+
+    const canvas = zoneMesh3D.material.map.image;
+    if (!canvas || canvas.width !== w || canvas.height !== h) {
+        canvas.width = w; canvas.height = h;
+    }
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, w, h);
+
+    for (const z of zones) {
+        if (!z.visible) continue;
+        const minGx = Math.max(0, Math.floor((z.x - ox) / res));
+        const maxGx = Math.min(w - 1, Math.ceil((z.x + z.w - ox) / res));
+        const minGy = Math.max(0, Math.floor((z.y - oy) / res));
+        const maxGy = Math.min(h - 1, Math.ceil((z.y + z.h - oy) / res));
+
+        const rx = minGx;
+        const ry = h - 1 - maxGy;
+        const rw = Math.max(1, maxGx - minGx + 1);
+        const rh = Math.max(1, maxGy - minGy + 1);
+
+        ctx.fillStyle = z.type === 'keepout' ? 'rgba(239, 68, 68, 0.45)' : 'rgba(245, 158, 11, 0.45)';
+        ctx.fillRect(rx, ry, rw, rh);
+    }
+    zoneMesh3D.material.map.needsUpdate = true;
 }
-function finishZoneEditing(gx, gy) {
-    if (!isZoneEditing || !zoneData) return;
-    isZoneEditing = false;
-    if (zoneShape === 'rect' && editZoneStartCell) {
-        paintZoneBoxBetween(editZoneStartCell.gx, editZoneStartCell.gy, gx, gy);
+
+async function fetchZones() {
+    try {
+        const res = await fetch('/api/zones');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && Array.isArray(data.zones)) {
+            zones = data.zones;
+            updateZoneUI();
+            update3DZoneMesh();
+        }
+    } catch (e) {
+        // Fallback gracefully
     }
-    lastZonePencilCell = null;
-    editZoneStartCell = null;
-    if (activeZoneChanges.size > 0) {
-        zoneUndoStack.push(Array.from(activeZoneChanges.values()));
-        if (zoneUndoStack.length > 50) zoneUndoStack.shift();
-        zoneRedoStack = [];
-        updateZoneUndoRedoButtons();
-    }
-    if (zoneMesh3D?.material?.map) zoneMesh3D.material.map.needsUpdate = true;
-}
-function undoZoneEdit() {
-    if (zoneUndoStack.length === 0 || !zoneData) return;
-    const patch = zoneUndoStack.pop();
-    zoneRedoStack.push(patch);
-    const ctx = zoneData.bitmap.getContext('2d');
-    for (const p of patch) {
-        zoneData.raw[p.idx] = p.old;
-        const rr = p.old === 1 ? 255 : (p.old === 2 ? 255 : 0);
-        const gg = p.old === 1 ? 0 : (p.old === 2 ? 255 : 0);
-        const aa = p.old === 0 ? 0 : 128;
-        const imgData = ctx.createImageData(1, 1);
-        imgData.data[0] = rr; imgData.data[1] = gg; imgData.data[2] = 0; imgData.data[3] = aa;
-        ctx.putImageData(imgData, p.x, zoneData.h - 1 - p.y);
-    }
-    updateZoneUndoRedoButtons();
-    if (zoneMesh3D?.material?.map) zoneMesh3D.material.map.needsUpdate = true;
-}
-function redoZoneEdit() {
-    if (zoneRedoStack.length === 0 || !zoneData) return;
-    const patch = zoneRedoStack.pop();
-    zoneUndoStack.push(patch);
-    const ctx = zoneData.bitmap.getContext('2d');
-    for (const p of patch) {
-        zoneData.raw[p.idx] = p.new;
-        const rr = p.new === 1 ? 255 : (p.new === 2 ? 255 : 0);
-        const gg = p.new === 1 ? 0 : (p.new === 2 ? 255 : 0);
-        const aa = p.new === 0 ? 0 : 128;
-        const imgData = ctx.createImageData(1, 1);
-        imgData.data[0] = rr; imgData.data[1] = gg; imgData.data[2] = 0; imgData.data[3] = aa;
-        ctx.putImageData(imgData, p.x, zoneData.h - 1 - p.y);
-    }
-    updateZoneUndoRedoButtons();
-    if (zoneMesh3D?.material?.map) zoneMesh3D.material.map.needsUpdate = true;
-}
-function resetZoneEdit() {
-    if (!zoneData) return;
-    zoneData.raw.fill(0);
-    const ctx = zoneData.bitmap.getContext('2d');
-    ctx.clearRect(0, 0, zoneData.w, zoneData.h);
-    zoneUndoStack = []; zoneRedoStack = [];
-    updateZoneUndoRedoButtons();
-    if (zoneMesh3D?.material?.map) zoneMesh3D.material.map.needsUpdate = true;
 }
 
 async function saveZones() {
-    if (!zoneData) {
-        document.getElementById('zone-edit-status').textContent = 'No zones drawn yet.';
+    if (!mapData || !mapInfo) {
+        const status = document.getElementById('zone-edit-status');
+        if (status) status.textContent = 'Please load a map first.';
         return;
     }
-    const btn = document.querySelector('#section-zone-editor .btn-primary');
-    btn.disabled = true;
-    btn.textContent = '💾 Saving...';
 
-    // We need to send keepout_mask and speed_mask arrays separately.
-    // However, sending JSON arrays of size ~1MB is slow. We can send base64 like the map editor.
-    // Wait, the backend save_map expects base64 PNG, but PNG is lossy or antialiased sometimes if drawn on canvas.
-    // Better send the raw arrays directly or RLE compress them?
-    // Let's send the zoneData.raw as a normal array since the map isn't huge (typically 1000x1000 = 1MB).
-    // To be efficient, let's just send the raw array.
-    const rawArray = Array.from(zoneData.raw);
+    const btn = document.querySelector('#section-zone-editor .btn-primary');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '💾 Saving...';
+    }
+
+    const rawGrid = rasterizeZonesToGrid();
+    const rawArray = rawGrid ? Array.from(rawGrid) : [];
 
     try {
         const res = await fetch('/api/save_zones', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                width: zoneData.w,
-                height: zoneData.h,
+                width: mapData.w,
+                height: mapData.h,
                 resolution: mapInfo.resolution,
                 origin_x: mapInfo.origin.position.x,
                 origin_y: mapInfo.origin.position.y,
-                data: rawArray
+                data: rawArray,
+                zones: zones
             })
         });
         const data = await res.json();
-        if (data.status === 'ok') {
-            document.getElementById('zone-edit-status').textContent = 'Zones saved & applied successfully!';
-            setTimeout(() => document.getElementById('zone-edit-status').textContent = 'Ready to draw zones', 3000);
+        const status = document.getElementById('zone-edit-status');
+        if (data.status === 'success' || data.status === 'ok') {
+            if (status) status.textContent = '✅ Zones saved and applied to Nav2!';
+            showWorkspaceMessage('Zones successfully saved & applied to Nav2 costmaps!');
+            setTimeout(() => {
+                if (status) status.textContent = 'Ready to draw zones';
+            }, 4000);
         } else {
-            document.getElementById('zone-edit-status').textContent = 'Error: ' + data.error;
+            if (status) status.textContent = 'Error: ' + (data.message || data.error);
         }
     } catch (e) {
-        document.getElementById('zone-edit-status').textContent = 'Network error.';
+        const status = document.getElementById('zone-edit-status');
+        if (status) status.textContent = 'Network error saving zones.';
     }
-    btn.disabled = false;
-    btn.textContent = '💾 Save Zones & Apply';
+    if (btn) {
+        btn.disabled = false;
+        btn.textContent = '💾 Save Zones & Apply to Nav2';
+    }
 }
 
 function startMapEditing(gx, gy, x, y) {
@@ -1302,6 +1632,11 @@ function onMapReceived(data) {
         `Topic: /map — ${w}×${h} @ ${mapInfo.resolution.toFixed(3)}m/px`;
 
     updateNavReadyUI();
+    if (zones.length === 0) {
+        fetchZones();
+    } else {
+        update3DZoneMesh();
+    }
 }
 
 // ── Costmap Rendering (RViz-style gradient) ───────────
@@ -1395,23 +1730,32 @@ function processCostmapToMesh(data, existingMesh, layer) {
 
 // ── 3D Interaction ────────────────────────────────
 function setMode(mode) {
+    if (currentTab === 'nav' && mode === 'edit_map') {
+        mode = 'view';
+    }
     cancelPlacement();
     interactMode = mode;
     const btnGoal = document.getElementById('btn-goal-mode');
     const btnInit = document.getElementById('btn-init-mode');
     const btnEdit = document.getElementById('btn-edit-mode');
+    const btnZone = document.getElementById('btn-edit-zone-mode');
     const btnView = document.getElementById('btn-view-mode');
     if (btnGoal) btnGoal.classList.toggle('active', mode === 'goal');
     if (btnInit) btnInit.classList.toggle('active', mode === 'initial_pose');
     if (btnEdit) btnEdit.classList.toggle('active', mode === 'edit_map');
+    if (btnZone) btnZone.classList.toggle('active', mode === 'edit_zone');
     if (btnView) btnView.classList.toggle('active', mode === 'view');
 
-    if (mode === 'edit_map') {
-        document.getElementById('interaction-hint').textContent = '🎨 Map Edit Mode: Left-drag to draw · Use sidebar tools & brush size · Esc to leave edit mode';
+    const hint = document.getElementById('interaction-hint');
+    if (mode === 'edit_zone') {
+        if (hint) hint.textContent = '🛡️ Adobe Zone Tool: Click & drag on map to draw rectangles · Drag handles to resize · Esc to exit';
+    } else if (mode === 'edit_map') {
+        if (hint) hint.textContent = '🎨 Map Edit Mode: Left-drag to draw · Use sidebar tools & brush size · Esc to leave edit mode';
     } else {
-        document.getElementById('interaction-hint').textContent = mode === 'view' ? 'Drag to orbit · Right-drag to pan · Scroll to zoom' : 'Click to place · Drag to choose heading · Esc to cancel';
+        if (hint) hint.textContent = mode === 'view' ? 'Drag to orbit · Right-drag to pan · Scroll to zoom' : 'Click to place · Drag to choose heading · Esc to cancel';
     }
     if (controls3D) controls3D.enabled = (mode === 'view');
+    renderZoneOverlay();
 }
 
 function resetView() {
@@ -1660,13 +2004,26 @@ function switchTab(tabId) {
     const costDisplaySec = document.getElementById('section-cost-display');
     const mapEditorSec = document.getElementById('section-map-editor');
     const zoneEditorSec = document.getElementById('section-zone-editor');
+    const motionArchSec = document.getElementById('section-motion-architecture');
 
     if (sceneLayersSec) sceneLayersSec.style.display = isNav ? '' : 'none';
     if (costmapsSec) costmapsSec.style.display = isNav ? '' : 'none';
     if (costDisplaySec) costDisplaySec.style.display = isNav ? '' : 'none';
     if (zoneEditorSec) zoneEditorSec.style.display = isNav ? '' : 'none';
+    if (motionArchSec) motionArchSec.style.display = isNav ? '' : 'none';
 
     if (mapEditorSec) mapEditorSec.style.display = isSlam ? '' : 'none';
+
+    // Toolbar buttons visibility for active tab
+    const btnEdit = document.getElementById('btn-edit-mode');
+    const btnZone = document.getElementById('btn-edit-zone-mode');
+    const btnInit = document.getElementById('btn-init-mode');
+    const btnGoal = document.getElementById('btn-goal-mode');
+
+    if (btnEdit) btnEdit.style.display = isSlam ? '' : 'none';
+    if (btnZone) btnZone.style.display = isNav ? '' : 'none';
+    if (btnInit) btnInit.style.display = isNav ? '' : 'none';
+    if (btnGoal) btnGoal.style.display = isNav ? '' : 'none';
 
     // Status checks
     if (tabId === 'nav') {
@@ -1744,8 +2101,8 @@ function toggleTeleop() {
 }
 
 // Speed Buttons
-let teleopMaxV = 0.5;
-let teleopMaxW = 1.0;
+let teleopMaxV = 0.10;
+let teleopMaxW = 0.2;
 
 function setTeleopSpeed(v, w, btnId) {
     teleopMaxV = v;
@@ -1930,3 +2287,131 @@ setInterval(() => {
 
     publishCmdVel(v, w);
 }, 100);
+
+// ── Motion & Planning Architecture Selector ────────────────────────
+let motionMode = {
+    controller: 'native',
+    planner: 'native'
+};
+let motionModeData = null;
+
+async function fetchMotionModes() {
+    try {
+        const res = await fetch('/api/motion_modes');
+        if (!res.ok) return;
+        const data = await res.json();
+        motionModeData = data;
+        if (data.active) {
+            motionMode = data.active;
+        }
+        updateMotionUI();
+    } catch (e) {
+        console.warn('Error fetching motion modes:', e);
+    }
+}
+
+async function selectControllerMode(controllerId) {
+    motionMode.controller = controllerId;
+    await applyMotionMode();
+}
+
+async function selectPlannerMode(plannerId) {
+    motionMode.planner = plannerId;
+    await applyMotionMode();
+}
+
+async function revertToStandardOK() {
+    motionMode.controller = 'native';
+    motionMode.planner = 'native';
+    await applyMotionMode();
+}
+
+async function applyMotionMode() {
+    updateMotionUI();
+    try {
+        const res = await fetch('/api/set_motion_mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(motionMode)
+        });
+        const result = await res.json();
+        if (result.status === 'success') {
+            if (typeof showWorkspaceMessage === 'function') {
+                showWorkspaceMessage(result.message || 'Motion architecture updated');
+            } else if (typeof showNotice === 'function') {
+                showNotice(result.message || 'Motion architecture updated');
+            }
+        } else {
+            if (typeof showNotice === 'function') showNotice(`Failed to switch mode: ${result.message}`);
+        }
+    } catch (e) {
+        if (typeof showNotice === 'function') showNotice(`Connection error setting motion mode: ${e.message}`);
+    }
+}
+
+function updateMotionUI() {
+    // Buttons state
+    const ctrlNative = document.getElementById('btn-ctrl-native');
+    const ctrlPid = document.getElementById('btn-ctrl-pid');
+    const ctrlSmc = document.getElementById('btn-ctrl-smc');
+
+    if (ctrlNative) ctrlNative.classList.toggle('active', motionMode.controller === 'native');
+    if (ctrlPid) ctrlPid.classList.toggle('active', motionMode.controller === 'pid');
+    if (ctrlSmc) ctrlSmc.classList.toggle('active', motionMode.controller === 'smc');
+
+    const planNative = document.getElementById('btn-plan-native');
+    const planBfs = document.getElementById('btn-plan-bfs');
+    const planAstar = document.getElementById('btn-plan-astar');
+
+    if (planNative) planNative.classList.toggle('active', motionMode.planner === 'native');
+    if (planBfs) planBfs.classList.toggle('active', motionMode.planner === 'bfs');
+    if (planAstar) planAstar.classList.toggle('active', motionMode.planner === 'astar');
+
+    // Badge state
+    const badge = document.getElementById('motion-mode-badge');
+    if (badge) {
+        if (motionMode.controller === 'native' && motionMode.planner === 'native') {
+            badge.className = 'mode-status-badge badge-native';
+            badge.textContent = 'Native OK';
+        } else if (motionMode.controller === 'smc') {
+            badge.className = 'mode-status-badge badge-smc';
+            badge.textContent = 'SMC Active';
+        } else {
+            badge.className = 'mode-status-badge badge-pid';
+            badge.textContent = `${motionMode.controller.toUpperCase()} + ${motionMode.planner.toUpperCase()}`;
+        }
+    }
+
+    // Title and Parameter Details Grid
+    const title = document.getElementById('arch-param-title');
+    const grid = document.getElementById('arch-param-grid');
+
+    const ctrlName = motionMode.controller === 'native' ? 'Native DWB' : (motionMode.controller === 'pid' ? 'PID Profiled' : 'SMC Control');
+    const planName = motionMode.planner === 'native' ? 'Nav2 A*' : (motionMode.planner === 'bfs' ? 'BFS Grid' : 'A* Optimal');
+    if (title) title.textContent = `Active: ${ctrlName} + ${planName}`;
+
+    if (grid) {
+        if (motionMode.controller === 'native') {
+            grid.innerHTML = `
+                <div><span>Speed:</span> <strong>0.18 m/s</strong></div>
+                <div><span>Accel:</span> <strong>0.40 m/s²</strong></div>
+                <div><span>Decel:</span> <strong>-0.50 m/s²</strong></div>
+                <div><span>Recovery:</span> <strong>Stop & BackUp</strong></div>
+            `;
+        } else if (motionMode.controller === 'pid') {
+            grid.innerHTML = `
+                <div><span>Profile:</span> <strong>S-Curve Jerk</strong></div>
+                <div><span>Max Jerk:</span> <strong>0.16 m/s³</strong></div>
+                <div><span>Cruise Kp:</span> <strong>3.20</strong></div>
+                <div><span>Decel Kp:</span> <strong>3.00</strong></div>
+            `;
+        } else if (motionMode.controller === 'smc') {
+            grid.innerHTML = `
+                <div><span>Method:</span> <strong>Alipour 2019</strong></div>
+                <div><span>Surfaces:</span> <strong>S1(ρ), S2(φ)</strong></div>
+                <div><span>Lambda:</span> <strong>λ1=0.5, λ2=1.5</strong></div>
+                <div><span>Switch K:</span> <strong>K1=2.0, K2=10.0</strong></div>
+            `;
+        }
+    }
+}

@@ -155,7 +155,7 @@ function drawPath(message) {
         const curve = new THREE.CatmullRomCurve3(curvePoints);
         const tubularSegments = Math.max(rawPoses.length * 2, 24);
         const tubeGeo = new THREE.TubeGeometry(curve, tubularSegments, 0.05, 8, false);
-        const tubeMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.9, depthTest: false });
+        const tubeMat = new THREE.MeshBasicMaterial({ color: 0x33ff33, transparent: true, opacity: 0.9, depthTest: false });
         const tubeMesh = new THREE.Mesh(tubeGeo, tubeMat);
         group.add(tubeMesh);
     } catch (e) {
@@ -194,6 +194,20 @@ function pointOnMap(event) {
     ray.setFromCamera(new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1), camera3D);
     return ray.intersectObject(mapMesh3D)[0]?.point || null;
 }
+function pointOnGround(event) {
+    if (!renderer3D || !camera3D) return null;
+    const rect = renderer3D.domElement.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return null;
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1), camera3D);
+    if (mapMesh3D) {
+        const hit = ray.intersectObject(mapMesh3D)[0];
+        if (hit) return hit.point;
+    }
+    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+    const target = new THREE.Vector3();
+    return ray.ray.intersectPlane(plane, target);
+}
 function clearPlacementPreview() {
     disposeMesh(placementArrow);
     placementArrow = null;
@@ -220,21 +234,232 @@ function editHeading(mode, degrees) {
     const marker = mode === 'goal' ? goalMesh3D : initMesh3D;
     marker?.setDirection(new THREE.Vector3(Math.cos(pose.yaw), Math.sin(pose.yaw), 0));
 }
+
+function handleZonePointerDown(event, pt) {
+    if (!pt) return;
+    const canvas = renderer3D.domElement;
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+
+    // 1. Check if clicked on an Adobe transform handle of the selected zone
+    if (selectedZoneId) {
+        const selZone = zones.find(z => z.id === selectedZoneId);
+        if (selZone) {
+            const handles = [
+                { name: 'nw', wx: selZone.x, wy: selZone.y + selZone.h },
+                { name: 'ne', wx: selZone.x + selZone.w, wy: selZone.y + selZone.h },
+                { name: 'se', wx: selZone.x + selZone.w, wy: selZone.y },
+                { name: 'sw', wx: selZone.x, wy: selZone.y },
+                { name: 'n', wx: selZone.x + selZone.w / 2, wy: selZone.y + selZone.h },
+                { name: 's', wx: selZone.x + selZone.w / 2, wy: selZone.y },
+                { name: 'e', wx: selZone.x + selZone.w, wy: selZone.y + selZone.h / 2 },
+                { name: 'w', wx: selZone.x, wy: selZone.y + selZone.h / 2 },
+            ];
+            for (const h of handles) {
+                const sp = worldToScreen(h.wx, h.wy);
+                if (sp && Math.hypot(sp.x - mouseX, sp.y - mouseY) <= 12) {
+                    zoneDragState = {
+                        mode: 'resize',
+                        handle: h.name,
+                        startWx: pt.x,
+                        startWy: pt.y,
+                        origX: selZone.x,
+                        origY: selZone.y,
+                        origW: selZone.w,
+                        origH: selZone.h
+                    };
+                    return;
+                }
+            }
+        }
+    }
+
+    // 2. Check if clicked inside any existing zone (check in reverse order)
+    let clickedZone = null;
+    for (let i = zones.length - 1; i >= 0; i--) {
+        const z = zones[i];
+        if (!z.visible) continue;
+        if (pt.x >= z.x && pt.x <= z.x + z.w && pt.y >= z.y && pt.y <= z.y + z.h) {
+            clickedZone = z;
+            break;
+        }
+    }
+
+    if (clickedZone) {
+        selectedZoneId = clickedZone.id;
+        updateZoneUI();
+        zoneDragState = {
+            mode: 'move',
+            startWx: pt.x,
+            startWy: pt.y,
+            origX: clickedZone.x,
+            origY: clickedZone.y,
+            origW: clickedZone.w,
+            origH: clickedZone.h
+        };
+        return;
+    }
+
+    // 3. Clicked on empty space
+    if (zoneTool === 'select') {
+        selectedZoneId = null;
+        updateZoneUI();
+        return;
+    }
+
+    // 4. Start drawing a new Adobe rectangle
+    selectedZoneId = null;
+    updateZoneUI();
+    isDrawingZone = true;
+    zoneDrawStart = { wx: pt.x, wy: pt.y };
+    zoneDrawCurrent = { wx: pt.x, wy: pt.y };
+}
+
+function handleZonePointerMove(event, pt) {
+    if (!pt) return;
+    const canvas = renderer3D.domElement;
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+
+    if (isDrawingZone) {
+        zoneDrawCurrent = { wx: pt.x, wy: pt.y };
+        const minX = Math.min(zoneDrawStart.wx, pt.x);
+        const maxX = Math.max(zoneDrawStart.wx, pt.x);
+        const minY = Math.min(zoneDrawStart.wy, pt.y);
+        const maxY = Math.max(zoneDrawStart.wy, pt.y);
+        const toolLabel = zoneTool === 'keepout' ? 'Keepout' : 'Speed Limit';
+        const hint = document.getElementById('interaction-hint');
+        if (hint) hint.textContent = `Drawing ${toolLabel} Box · ${(maxX - minX).toFixed(2)} m × ${(maxY - minY).toFixed(2)} m · Release to finish`;
+        return;
+    }
+
+    if (zoneDragState) {
+        const selZone = zones.find(z => z.id === selectedZoneId);
+        if (!selZone) return;
+        const dx = pt.x - zoneDragState.startWx;
+        const dy = pt.y - zoneDragState.startWy;
+
+        if (zoneDragState.mode === 'move') {
+            selZone.x = zoneDragState.origX + dx;
+            selZone.y = zoneDragState.origY + dy;
+            updateZoneInspectorInputs(selZone);
+            const hint = document.getElementById('interaction-hint');
+            if (hint) hint.textContent = `Moving ${selZone.name} · Position (${selZone.x.toFixed(2)}, ${selZone.y.toFixed(2)}) m`;
+        } else if (zoneDragState.mode === 'resize') {
+            const h = zoneDragState.handle;
+            let newX = zoneDragState.origX;
+            let newY = zoneDragState.origY;
+            let newW = zoneDragState.origW;
+            let newH = zoneDragState.origH;
+
+            if (h.includes('e')) { newW = Math.max(0.1, zoneDragState.origW + dx); }
+            if (h.includes('w')) {
+                const diff = Math.min(dx, zoneDragState.origW - 0.1);
+                newX = zoneDragState.origX + diff;
+                newW = zoneDragState.origW - diff;
+            }
+            if (h.includes('n')) { newH = Math.max(0.1, zoneDragState.origH + dy); }
+            if (h.includes('s')) {
+                const diff = Math.min(dy, zoneDragState.origH - 0.1);
+                newY = zoneDragState.origY + diff;
+                newH = zoneDragState.origH - diff;
+            }
+            selZone.x = newX; selZone.y = newY; selZone.w = newW; selZone.h = newH;
+            updateZoneInspectorInputs(selZone);
+            const hint = document.getElementById('interaction-hint');
+            if (hint) hint.textContent = `Resizing ${selZone.name} · Size ${newW.toFixed(2)} m × ${newH.toFixed(2)} m`;
+        }
+        return;
+    }
+
+    // Hover feedback cursor
+    if (selectedZoneId) {
+        const selZone = zones.find(z => z.id === selectedZoneId);
+        if (selZone) {
+            const handles = [
+                { name: 'nw', cursor: 'nwse-resize', wx: selZone.x, wy: selZone.y + selZone.h },
+                { name: 'ne', cursor: 'nesw-resize', wx: selZone.x + selZone.w, wy: selZone.y + selZone.h },
+                { name: 'se', cursor: 'nwse-resize', wx: selZone.x + selZone.w, wy: selZone.y },
+                { name: 'sw', cursor: 'nesw-resize', wx: selZone.x, wy: selZone.y },
+                { name: 'n', cursor: 'ns-resize', wx: selZone.x + selZone.w / 2, wy: selZone.y + selZone.h },
+                { name: 's', cursor: 'ns-resize', wx: selZone.x + selZone.w / 2, wy: selZone.y },
+                { name: 'e', cursor: 'ew-resize', wx: selZone.x + selZone.w, wy: selZone.y + selZone.h / 2 },
+                { name: 'w', cursor: 'ew-resize', wx: selZone.x, wy: selZone.y + selZone.h / 2 },
+            ];
+            for (const h of handles) {
+                const sp = worldToScreen(h.wx, h.wy);
+                if (sp && Math.hypot(sp.x - mouseX, sp.y - mouseY) <= 10) {
+                    canvas.style.cursor = h.cursor;
+                    return;
+                }
+            }
+            if (pt.x >= selZone.x && pt.x <= selZone.x + selZone.w && pt.y >= selZone.y && pt.y <= selZone.y + selZone.h) {
+                canvas.style.cursor = 'move';
+                return;
+            }
+        }
+    }
+
+    canvas.style.cursor = (zoneTool === 'select') ? 'default' : 'crosshair';
+}
+
+function handleZonePointerUp(event, pt) {
+    const canvas = renderer3D?.domElement;
+    if (isDrawingZone) {
+        isDrawingZone = false;
+        if (zoneDrawStart && pt) {
+            const minX = Math.min(zoneDrawStart.wx, pt.x);
+            const maxX = Math.max(zoneDrawStart.wx, pt.x);
+            const minY = Math.min(zoneDrawStart.wy, pt.y);
+            const maxY = Math.max(zoneDrawStart.wy, pt.y);
+            const w = maxX - minX;
+            const h = maxY - minY;
+
+            if (w >= 0.15 && h >= 0.15) {
+                const newZone = {
+                    id: 'zone_' + Date.now(),
+                    name: (zoneTool === 'keepout' ? 'Keepout' : 'Speed Limit') + ' ' + (zones.length + 1),
+                    type: zoneTool === 'speed' ? 'speed' : 'keepout',
+                    speedLimit: 0.5,
+                    x: minX,
+                    y: minY,
+                    w: w,
+                    h: h,
+                    visible: true
+                };
+                zones.push(newZone);
+                selectedZoneId = newZone.id;
+                updateZoneUI();
+                update3DZoneMesh();
+                showWorkspaceMessage(`Created ${newZone.name} (${w.toFixed(2)}m × ${h.toFixed(2)}m)`);
+            }
+        }
+        zoneDrawStart = null;
+        zoneDrawCurrent = null;
+        if (canvas) canvas.style.cursor = (zoneTool === 'select') ? 'default' : 'crosshair';
+        return;
+    }
+
+    if (zoneDragState) {
+        zoneDragState = null;
+        updateZoneUI();
+        update3DZoneMesh();
+        if (canvas) canvas.style.cursor = (zoneTool === 'select') ? 'default' : 'crosshair';
+    }
+}
+
 function installViewportControls() {
     const canvas = renderer3D.domElement;
     canvas.addEventListener('pointerdown', event => {
         if (event.button !== 0 || !mapData) return;
 
-        
         if (interactMode === 'edit_zone') {
-            const point = pointOnMap(event);
-            if (!point || !mapInfo) return;
-            const gx = Math.floor((point.x - mapInfo.origin.position.x) / mapInfo.resolution);
-            const gy = Math.floor((point.y - mapInfo.origin.position.y) / mapInfo.resolution);
-            if (gx >= 0 && gx < mapData.w && gy >= 0 && gy < mapData.h) {
-                canvas.setPointerCapture(event.pointerId);
-                startZoneEditing(gx, gy);
-            }
+            const point = pointOnGround(event);
+            if (!point) return;
+            canvas.setPointerCapture(event.pointerId);
+            handleZonePointerDown(event, point);
             return;
         }
         if (interactMode === 'edit_map') {
@@ -258,9 +483,14 @@ function installViewportControls() {
         document.getElementById('interaction-hint').textContent = 'Position anchored · Hold and drag toward the robot front · Release to finish';
     });
     canvas.addEventListener('pointermove', event => {
-        const point = pointOnMap(event);
+        const point = pointOnGround(event);
         if (!point) return;
         document.getElementById('coord-readout').textContent = `map · X ${point.x.toFixed(2)} m · Y ${point.y.toFixed(2)} m`;
+
+        if (interactMode === 'edit_zone') {
+            handleZonePointerMove(event, point);
+            return;
+        }
 
         if (interactMode === 'edit_map' && isMapEditing && mapInfo) {
             const gx = Math.floor((point.x - mapInfo.origin.position.x) / mapInfo.resolution);
@@ -276,25 +506,10 @@ function installViewportControls() {
         document.getElementById('interaction-hint').textContent = `X ${placement.x.toFixed(2)} m · Y ${placement.y.toFixed(2)} m · Yaw ${(placement.yaw * 180 / Math.PI).toFixed(1)}° · Release to finish`;
     });
     canvas.addEventListener('pointerup', event => {
-        
-        if (interactMode === 'edit_zone' && isZoneEditing) {
-            const point = pointOnMap(event);
-            if (point && mapInfo) {
-                const gx = Math.floor((point.x - mapInfo.origin.position.x) / mapInfo.resolution);
-                const gy = Math.floor((point.y - mapInfo.origin.position.y) / mapInfo.resolution);
-                continueZoneEditing(gx, gy);
-            }
-            return;
-        }
-        
-        if (interactMode === 'edit_zone' && isZoneEditing) {
-            canvas.releasePointerCapture(event.pointerId);
-            const point = pointOnMap(event);
-            if (point && mapInfo) {
-                const gx = Math.floor((point.x - mapInfo.origin.position.x) / mapInfo.resolution);
-                const gy = Math.floor((point.y - mapInfo.origin.position.y) / mapInfo.resolution);
-                finishZoneEditing(gx, gy);
-            }
+        if (interactMode === 'edit_zone') {
+            if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+            const point = pointOnGround(event);
+            handleZonePointerUp(event, point);
             return;
         }
         if (interactMode === 'edit_map' && isMapEditing) {
@@ -317,10 +532,12 @@ function installViewportControls() {
     });
     canvas.addEventListener('pointercancel', () => {
         if (isMapEditing) finishMapEditing(editStartCell?.gx || 0, editStartCell?.gy || 0, editStartCell?.x || 0, editStartCell?.y || 0);
+        if (isDrawingZone) isDrawingZone = false;
         setMode('view');
     });
     canvas.addEventListener('lostpointercapture', () => {
         if (isMapEditing) finishMapEditing(editStartCell?.gx || 0, editStartCell?.gy || 0, editStartCell?.x || 0, editStartCell?.y || 0);
+        if (isDrawingZone) isDrawingZone = false;
         if (placement) setMode('view');
     });
     new ResizeObserver(() => {
@@ -333,7 +550,29 @@ function installViewportControls() {
 }
 window.addEventListener('keydown', event => {
     if (/INPUT|SELECT|TEXTAREA/.test(event.target.tagName)) return;
-    if (event.key === 'Escape') setMode('view');
+    if (event.key === 'Escape') {
+        if (selectedZoneId) {
+            selectedZoneId = null;
+            updateZoneUI();
+        } else {
+            setMode('view');
+        }
+    }
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+        if (interactMode === 'edit_zone' && selectedZoneId) {
+            deleteSelectedZone();
+            event.preventDefault();
+        }
+    }
+    if (event.key.toLowerCase() === 'v' && !event.ctrlKey && !event.metaKey) {
+        if (interactMode === 'edit_zone') setZoneTool('select');
+    }
+    if (event.key.toLowerCase() === 'k' && !event.ctrlKey && !event.metaKey) {
+        if (interactMode === 'edit_zone') setZoneTool('keepout');
+    }
+    if (event.key.toLowerCase() === 's' && !event.ctrlKey && !event.metaKey) {
+        if (interactMode === 'edit_zone') setZoneTool('speed');
+    }
     if (event.key.toLowerCase() === 'f') resetView();
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
         if (event.shiftKey) redoMapEdit(); else undoMapEdit();
@@ -346,7 +585,11 @@ window.addEventListener('keydown', event => {
 });
 window.addEventListener('DOMContentLoaded', () => {
     // Render the workspace before connection; no robot command is sent by initialization.
-    try { init3DViewer(); updateNavReadyUI(); }
+    try {
+        if (typeof switchTab === 'function') switchTab('nav');
+        init3DViewer();
+        updateNavReadyUI();
+    }
     catch (error) { showNotice(`3D viewer unavailable: ${error.message}. Check that Three.js loaded, then reload.`); }
 });
 setInterval(() => {
