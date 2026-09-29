@@ -421,14 +421,14 @@ The AMR-POLEBOT project is a collaborative effort between faculty researchers an
 
 | Name | Role | Affiliation / Profile |
 |------|------|-----------------------|
-| **Ismail, M.T.** | Head of Robotics and Automation Laboratory; Project Director and Mechatronics Systems | Politeknik Manufaktur Bandung |
-| **Andri Wiyono, M.T.** | Faculty Researcher — Control Systems; AMR Drive Architecture and Differential Kinematics | Politeknik Manufaktur Bandung |
+| **Ismail Rokhim, S.T., M.T.** | Head of Robotics and Automation Laboratory; Project Director and Mechatronics Systems | [ismail@ae.polman-bandung.ac.id](mailto:ismail@ae.polman-bandung.ac.id) |
+| **Andri Wiyono, M.T.** | Faculty Researcher — Control Systems; AMR Drive Architecture and Differential Kinematics | [andri_w@polman-bandung.ac.id](mailto:andri_w@polman-bandung.ac.id) |
 | **Siti Rodiah, M.T.** | Faculty Researcher — Intelligent Systems and Navigation; Path Planning Algorithms and Localization | [@rdhst](https://github.com/rdhst) |
 | **Nur Jamiludin Ramadhan, M.T.** | Faculty Researcher — Robotics and Automation; Sensor Integration, Firmware, and Control Systems | [@nj-ramadhan](https://github.com/nj-ramadhan) |
 | **Wahyu Caesarendra, Ph.D.** | Senior Researcher and Scientific Advisor; Autonomous Navigation and Intelligent Systems | [@WhyAC](https://github.com/WhyAC) |
-| **Pipit Anggraeni, M.T.** | Faculty Researcher — Mechatronics; Instrumentation and Robot Dynamics Testing | Politeknik Manufaktur Bandung |
-| **Noval, M.T.** | Faculty Researcher — Embedded Systems; CAN Bus Hardware Communication and Power Management | Politeknik Manufaktur Bandung |
-| **Adhitya, M.T.** | Faculty Researcher — Robotics Instrumentation; Sensor Perception, LiDAR Safety, and Calibration | Politeknik Manufaktur Bandung |
+| **Dr. Eng. Pipit Anggraeni, S.T., M.T., M.Sc.Eng.** | Faculty Researcher — Mechatronics; Instrumentation and Robot Dynamics Testing | [pipit_anggraeni@polman-bandung.ac.id](mailto:pipit_anggraeni@polman-bandung.ac.id) |
+| **Dr. Noval Lilansa, Dipl.Ing., M.T.** | Faculty Researcher — Embedded Systems; CAN Bus Hardware Communication and Power Management | [noval@polman-bandung.ac.id](mailto:noval@polman-bandung.ac.id) |
+| **Adhitya Sumardi Sunarya, S.Si., M.Si.** | Faculty Researcher — Robotics Instrumentation; Sensor Perception, LiDAR Safety, and Calibration | [adhitya@polman-bandung.ac.id](mailto:adhitya@polman-bandung.ac.id) |
 
 ### Student Engineering Developers
 
